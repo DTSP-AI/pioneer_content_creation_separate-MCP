@@ -90,8 +90,8 @@ class PiAPIVideoTool(BaseTool):
     - And more
     """
 
-    name = "piapi_video_generator"
-    description = """
+    name: str = "piapi_video_generator"
+    description: str = """
     Generate a complete AI video from a script using PiAPI.ai.
 
     Input: script text, platform, duration, style
@@ -391,8 +391,8 @@ class PiAPIVideoTool(BaseTool):
 
 class SimpleTTSTool(BaseTool):
     """Simplified TTS tool using ElevenLabs (fallback)."""
-    name = "simple_tts"
-    description = "Generate audio from text using ElevenLabs (fallback)"
+    name: str = "simple_tts"
+    description: str = "Generate audio from text using ElevenLabs (fallback)"
 
     def _run(self, text: str) -> str:
         return "Fallback TTS not implemented - use PiAPI.ai"

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # Mem0 Memory
     MEM0_API_KEY: str
+    MEM0_PROJECT: str = "content-creation-agent"
+    MEM0_STORE: str = "local"  # local | remote
     MEM0_ORG_ID: Optional[str] = None
 
     # Qdrant Vector Store (for conversation history)
@@ -35,18 +37,20 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None  # For Qdrant Cloud
 
     # LLM Providers
-    ANTHROPIC_API_KEY: str
+    ANTHROPIC_API_KEY: Optional[str] = None  # Optional - can use OpenAI instead
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
 
-    OPENAI_API_KEY: str  # Required for embeddings and optionally for GPT models
+    OPENAI_API_KEY: str  # Required for embeddings and GPT models
     OPENAI_MODEL: str = "gpt-5-nano"  # For supervisor routing
+    OPENAI_SCRIPT_MODEL: str = "gpt-4-turbo-preview"  # For script generation
 
     # Voice Services
+    TTS_PROVIDER: str = "elevenlabs"  # elevenlabs | piapi
     ELEVENLABS_API_KEY: str
     ELEVENLABS_VOICE_ID: str = "21m00Tcm4TlvDq8ikWAM"  # Default Rachel voice
 
     # Video Generation (PiAPI.ai - AI Video Generation)
-    PIAPI_API_KEY: str
+    PIAPI_API_KEY: Optional[str] = None  # Optional: only needed for direct API access (MCP preferred)
     PIAPI_BASE_URL: str = "https://api.piapi.ai/api/v1"
 
     # PiAPI MCP Server (Model Context Protocol)

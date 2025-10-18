@@ -73,8 +73,8 @@ class TikTokUploadTool(BaseTool):
     5. Return TikTok video URL
     """
 
-    name = "tiktok_upload"
-    description = """
+    name: str = "tiktok_upload"
+    description: str = """
     Upload a video to TikTok with caption and metadata.
 
     Input: video URL/path, caption, hashtags, privacy settings

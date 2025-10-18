@@ -77,8 +77,8 @@ class YouTubeShortsUploadTool(BaseTool):
     5. Publish and return YouTube URL
     """
 
-    name = "youtube_shorts_upload"
-    description = """
+    name: str = "youtube_shorts_upload"
+    description: str = """
     Upload a video to YouTube Shorts with metadata.
 
     Input: video URL/path, title, description, tags, privacy settings

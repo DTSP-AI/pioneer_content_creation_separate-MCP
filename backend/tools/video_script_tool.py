@@ -9,8 +9,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 import logging
-
-from anthropic import AsyncAnthropic
+import openai
 
 from backend.config import get_settings, COST_PER_1K_TOKENS
 
@@ -42,8 +41,8 @@ class VideoScriptGeneratorTool(BaseTool):
     Creates platform-optimized scripts for TikTok and YouTube Shorts.
     """
 
-    name = "video_script_generator"
-    description = """
+    name: str = "video_script_generator"
+    description: str = """
     Generate an engaging video script for TikTok or YouTube Shorts.
     Provide a topic, target platform, duration, and tone.
     Returns a formatted script with hook, body, and call-to-action.
@@ -81,7 +80,16 @@ class VideoScriptGeneratorTool(BaseTool):
             JSON string with script and metadata
         """
         try:
-            client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            # Use OpenAI if Anthropic key not available
+            if settings.ANTHROPIC_API_KEY:
+                from anthropic import AsyncAnthropic
+                client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+                model = settings.ANTHROPIC_MODEL
+                use_anthropic = True
+            else:
+                client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                model = settings.OPENAI_SCRIPT_MODEL
+                use_anthropic = False
 
             # Calculate word count (average speaking rate: 150 words/minute)
             target_word_count = int((duration_seconds / 60) * 150)
@@ -91,23 +99,36 @@ class VideoScriptGeneratorTool(BaseTool):
                 topic, platform, duration_seconds, target_word_count, tone
             )
 
-            # Call Claude
-            response = await client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
-                max_tokens=1000,
-                temperature=0.7,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }]
-            )
-
-            script = response.content[0].text
+            # Call LLM
+            if use_anthropic:
+                response = await client.messages.create(
+                    model=model,
+                    max_tokens=1000,
+                    temperature=0.7,
+                    messages=[{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                )
+                script = response.content[0].text
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
+            else:
+                response = await client.chat.completions.create(
+                    model=model,
+                    max_tokens=1000,
+                    temperature=0.7,
+                    messages=[{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                )
+                script = response.choices[0].message.content
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
 
             # Calculate cost
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            cost_usd = self._calculate_cost(input_tokens, output_tokens)
+            cost_usd = self._calculate_cost(input_tokens, output_tokens, use_anthropic)
 
             logger.info(
                 f"Generated script for '{topic}' "
@@ -186,12 +207,19 @@ Format the output as:
 
 Begin writing the script now:"""
 
-    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+    def _calculate_cost(self, input_tokens: int, output_tokens: int, use_anthropic: bool = True) -> float:
         """Calculate API cost based on token usage."""
-        costs = COST_PER_1K_TOKENS.get(settings.ANTHROPIC_MODEL, {
-            "input": 0.003,
-            "output": 0.015
-        })
+        if use_anthropic:
+            costs = COST_PER_1K_TOKENS.get(settings.ANTHROPIC_MODEL, {
+                "input": 0.003,
+                "output": 0.015
+            })
+        else:
+            # OpenAI GPT-4 Turbo pricing
+            costs = {
+                "input": 0.01,   # $0.01 per 1K input tokens
+                "output": 0.03   # $0.03 per 1K output tokens
+            }
 
         input_cost = (input_tokens / 1000) * costs["input"]
         output_cost = (output_tokens / 1000) * costs["output"]

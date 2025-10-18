@@ -229,7 +229,7 @@ async def get_messages(
                 role=msg.role,
                 content=msg.content,
                 created_at=msg.created_at,
-                metadata=msg.metadata
+                metadata=msg.message_metadata
             )
             for msg in messages
         ]
@@ -323,7 +323,7 @@ async def send_message(
                 role=agent_message.role,
                 content=agent_message.content,
                 created_at=agent_message.created_at,
-                metadata=agent_message.metadata
+                metadata=agent_message.message_metadata
             ),
             thread=ChatThreadResponse(
                 thread_id=str(thread.id),
@@ -367,7 +367,7 @@ async def approve_workflow(
             raise HTTPException(status_code=404, detail="Message not found")
 
         # Check if message has proposal
-        if not message.metadata or not message.metadata.get("workflow_proposal"):
+        if not message.message_metadata or not message.message_metadata.get("workflow_proposal"):
             raise HTTPException(status_code=400, detail="Message does not contain a workflow proposal")
 
         # Create workflow from proposal
@@ -410,10 +410,10 @@ async def reject_workflow(
             raise HTTPException(status_code=404, detail="Message not found")
 
         # Update metadata to mark as rejected
-        if message.metadata:
-            message.metadata["awaiting_approval"] = False
-            message.metadata["rejected"] = True
-            message.metadata["rejected_at"] = datetime.utcnow().isoformat()
+        if message.message_metadata:
+            message.message_metadata["awaiting_approval"] = False
+            message.message_metadata["rejected"] = True
+            message.message_metadata["rejected_at"] = datetime.utcnow().isoformat()
 
         await session.commit()
 

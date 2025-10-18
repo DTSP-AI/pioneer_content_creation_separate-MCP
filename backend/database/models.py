@@ -170,7 +170,7 @@ class ThreadMessage(Base):
     content = Column(Text, nullable=False)
 
     # Metadata (tool calls, costs, etc.)
-    metadata = Column(JSON, nullable=True)
+    message_metadata = Column(JSON, nullable=True)
 
     # Optional feedback
     feedback_score = Column(Float, nullable=True)
@@ -299,7 +299,7 @@ class CostTracking(Base):
     cost_calculation = Column(JSON, nullable=True)  # {rate, quantity, formula}
 
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    cost_metadata = Column(JSON, nullable=True)
 
     # Relationships
     execution = relationship("WorkflowExecution", back_populates="cost_records")
@@ -335,7 +335,7 @@ async def init_database():
     try:
         # Create async engine
         engine = create_async_engine(
-            settings.DATABASE_URL,
+            settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
             echo=settings.ENVIRONMENT == "development",
             pool_size=10,
             max_overflow=20,

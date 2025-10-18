@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.config import get_settings
@@ -22,12 +22,20 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-# Initialize Claude
-claude = ChatAnthropic(
-    model=settings.ANTHROPIC_MODEL,
-    temperature=0.7,
-    anthropic_api_key=settings.ANTHROPIC_API_KEY
-)
+# Initialize LLM (use OpenAI if Anthropic key not available)
+if settings.ANTHROPIC_API_KEY:
+    from langchain_anthropic import ChatAnthropic
+    llm = ChatAnthropic(
+        model=settings.ANTHROPIC_MODEL,
+        temperature=0.7,
+        anthropic_api_key=settings.ANTHROPIC_API_KEY
+    )
+else:
+    llm = ChatOpenAI(
+        model=settings.OPENAI_SCRIPT_MODEL,
+        temperature=0.7,
+        api_key=settings.OPENAI_API_KEY
+    )
 
 
 async def process_chat_message(
@@ -120,7 +128,7 @@ Response: {"intent": "question", "platforms": [], "content_type": null, "topic":
             HumanMessage(content=message)
         ]
 
-        response = await claude.ainvoke(messages)
+        response = await llm.ainvoke(messages)
 
         # Parse JSON response
         import json
@@ -235,7 +243,7 @@ Keep responses concise and friendly."""
             HumanMessage(content=message)
         ]
 
-        response = await claude.ainvoke(messages)
+        response = await llm.ainvoke(messages)
 
         return {
             "content": response.content,
@@ -267,7 +275,7 @@ async def approve_workflow_proposal(
         Created workflow details
     """
     try:
-        proposal = message.metadata.get("workflow_proposal", {})
+        proposal = message.message_metadata.get("workflow_proposal", {})
 
         # Import here to avoid circular dependency
         from backend.api.routes import CreateWorkflowRequest

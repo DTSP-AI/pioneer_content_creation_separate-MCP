@@ -46,8 +46,8 @@ class GoogleSheetsTrendsTool(BaseTool):
         Column E: Notes
     """
 
-    name = "google_sheets_trends"
-    description = """
+    name: str = "google_sheets_trends"
+    description: str = """
     Fetch trending topics from Google Sheets for content inspiration.
     Use this to discover viral trends, popular hashtags, and content ideas.
     Returns a list of trending topics with metadata.
