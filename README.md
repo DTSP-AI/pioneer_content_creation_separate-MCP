@@ -65,45 +65,107 @@ This is a **production-ready AI content pipeline** that automates the entire con
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    React Frontend (Port 3006)                │
-│  • Framer Motion animations  • Real-time SSE updates        │
-│  • Dark theme UI             • Workflow visualization       │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ HTTP + SSE
-┌─────────────────▼───────────────────────────────────────────┐
-│                FastAPI Backend (Port 8006)                   │
-│  • REST API              • SSE streaming                     │
-│  • LangGraph orchestration  • Cost tracking                 │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-      ┌───────────┼───────────┐
-      │           │           │
-┌─────▼─────┐ ┌──▼──────┐ ┌──▼──────────┐
-│ PostgreSQL│ │  Qdrant │ │   Mem0      │
-│  (5432)   │ │ (6333)  │ │ (Platform)  │
-└───────────┘ └─────────┘ └─────────────┘
-      │
-┌─────▼──────────────────────────────────────────────────────┐
-│              LangGraph Multi-Agent Workflow                 │
-│                                                             │
-│  ┌─────────────┐                                           │
-│  │ Supervisor  │ ───┐                                      │
-│  └─────────────┘    │                                      │
-│                     │                                      │
-│       ┌─────────────▼──────────┐                          │
-│       │  Content Creation      │                          │
-│       │  • Generate script     │                          │
-│       │  • Create video (MCP)  │                          │
-│       └─────────────┬──────────┘                          │
-│                     │                                      │
-│       ┌─────────────▼──────────┐                          │
-│       │     Publishing         │                          │
-│       │  • TikTok upload       │                          │
-│       │  • YouTube upload      │                          │
-│       └────────────────────────┘                          │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                  React Frontend (Port 3006)                       │
+│              • Framer Motion animations                          │
+│              • Real-time SSE workflow updates                    │
+│              • Dark theme UI with cost tracking                  │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │ HTTP + SSE
+┌────────────────────────▼─────────────────────────────────────────┐
+│                  FastAPI Backend (Port 8000)                      │
+│              • REST API with OpenAPI docs                        │
+│              • SSE streaming for real-time updates              │
+│              • LangGraph workflow orchestration                  │
+└────────────┬─────────────────────────────┬──────────────────────┘
+             │                             │
+    ┌────────▼────────┐          ┌────────▼────────┐
+    │   PostgreSQL    │          │  Hybrid Memory  │
+    │    (Port 5432)  │          │   Architecture  │
+    │                 │          │                 │
+    │ • Multi-tenant  │          │  ┌───────────┐  │
+    │   database      │          │  │   Mem0    │  │ Semantic memory
+    │ • Thread state  │          │  │ Platform  │  │ (agent learnings)
+    │ • Checkpoints   │          │  └─────┬─────┘  │
+    │ • Workflow logs │          │        │        │
+    └─────────────────┘          │  ┌─────▼─────┐  │
+                                 │  │  Qdrant   │  │ Vector search
+                                 │  │ (Port 6333)│ │ (conversation)
+                                 │  └───────────┘  │
+                                 └─────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                  LangGraph Multi-Agent Workflow                   │
+│                        (Single StateGraph)                        │
+│                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. SupervisorAgent (GPT-5 Nano)                           │  │
+│  │    • Retrieves memory context (Mem0 + Qdrant)            │  │
+│  │    • LLM-based routing with structured output             │  │
+│  │    • Validates request & checks cost limits               │  │
+│  │    • Routes to: content_creation | reject | clarify       │  │
+│  └──────────────────────┬─────────────────────────────────────┘  │
+│                         │                                         │
+│  ┌──────────────────────▼─────────────────────────────────────┐  │
+│  │ 2. ContentCreationAgent (Claude AI + PiAPI MCP)           │  │
+│  │    ┌────────────────────────────────────────────┐         │  │
+│  │    │ Tool 1: GoogleSheetsTrendsTool             │         │  │
+│  │    │         → Fetch trending topics (optional) │         │  │
+│  │    └────────────────────────────────────────────┘         │  │
+│  │    ┌────────────────────────────────────────────┐         │  │
+│  │    │ Tool 2: VideoScriptGeneratorTool           │         │  │
+│  │    │         → Claude AI generates script        │         │  │
+│  │    │         → Platform-optimized (TikTok/YT)   │         │  │
+│  │    └────────────────────────────────────────────┘         │  │
+│  │    ┌────────────────────────────────────────────┐         │  │
+│  │    │ Tool 3: PiAPIVideoTool (via MCP)           │         │  │
+│  │    │    ┌─────────────────────────────────┐     │         │  │
+│  │    │    │  PiAPI MCP Server (Port 7870)   │     │         │  │
+│  │    │    │  • Text-to-video generation      │     │         │  │
+│  │    │    │  • Hunyuan, Kling, Luma, Runway │     │         │  │
+│  │    │    │  • Minimax video models         │     │         │  │
+│  │    │    │  • Auto voiceover + captions    │     │         │  │
+│  │    │    └─────────────────────────────────┘     │         │  │
+│  │    └────────────────────────────────────────────┘         │  │
+│  │    Output: video_url, script, captions, cost              │  │
+│  └──────────────────────┬─────────────────────────────────────┘  │
+│                         │                                         │
+│                         │ (Conditional fan-out to platforms)      │
+│                         │                                         │
+│         ┌───────────────┴───────────────┐                        │
+│         │                               │                        │
+│  ┌──────▼──────────┐           ┌───────▼──────────┐             │
+│  │ 3. TikTokAgent  │           │ 4. YouTubeShorts │             │
+│  │                 │ [Parallel]│     Agent        │             │
+│  │ • OAuth flow    │           │ • OAuth2 flow    │             │
+│  │ • Video upload  │           │ • Shorts upload  │             │
+│  │ • Metadata      │           │ • Metadata opt.  │             │
+│  │ • Retry logic   │           │ • Retry logic    │             │
+│  └─────────┬───────┘           └────────┬─────────┘             │
+│            │                            │                        │
+│            └────────────┬───────────────┘                        │
+│                         ▼                                         │
+│                       [END]                                       │
+│           publish_results: {tiktok: {...}, youtube: {...}}       │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+
+Memory Flow:
+─────────────
+1. User Request → Supervisor retrieves context from Mem0 + Qdrant
+2. Supervisor decision stored to Mem0 (learning from routing)
+3. ContentCreation stores script/video metadata to Mem0 + Qdrant
+4. Publishing results stored to Mem0 (campaign history)
+5. Next workflow uses this history for better recommendations
+
+Data Flow:
+──────────
+User Request → SupervisorAgent → ContentCreationAgent → PiAPI MCP Server
+                      ↓                    ↓                    ↓
+                  [Memory]            [Claude AI]          [Video Models]
+                      ↓                    ↓                    ↓
+                [Mem0+Qdrant]          [Script]          [MP4 with captions]
+                      ↓                    ↓                    ↓
+              [Past campaigns]    → Video metadata ←    [TikTok + YouTube]
 ```
 
 ---
