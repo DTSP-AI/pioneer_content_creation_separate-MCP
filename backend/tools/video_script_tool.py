@@ -1,0 +1,199 @@
+"""
+Video Script Generator Tool
+
+Generates engaging video scripts using Anthropic Claude.
+Used by ContentCreationAgent for content creation.
+"""
+
+from typing import Optional, Type
+from pydantic import BaseModel, Field
+from langchain.tools import BaseTool
+import logging
+
+from anthropic import AsyncAnthropic
+
+from backend.config import get_settings, COST_PER_1K_TOKENS
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+class VideoScriptInput(BaseModel):
+    """Input schema for video script generation."""
+    topic: str = Field(description="The main topic or trend for the video")
+    platform: str = Field(
+        default="tiktok",
+        description="Target platform: 'tiktok' or 'youtube_shorts'"
+    )
+    duration_seconds: int = Field(
+        default=30,
+        description="Desired video duration in seconds (15-60)"
+    )
+    tone: str = Field(
+        default="engaging",
+        description="Tone: 'professional', 'casual', 'energetic', 'educational'"
+    )
+
+
+class VideoScriptGeneratorTool(BaseTool):
+    """
+    Generate video scripts using Claude API.
+
+    Creates platform-optimized scripts for TikTok and YouTube Shorts.
+    """
+
+    name = "video_script_generator"
+    description = """
+    Generate an engaging video script for TikTok or YouTube Shorts.
+    Provide a topic, target platform, duration, and tone.
+    Returns a formatted script with hook, body, and call-to-action.
+    """
+    args_schema: Type[BaseModel] = VideoScriptInput
+
+    def _run(
+        self,
+        topic: str,
+        platform: str = "tiktok",
+        duration_seconds: int = 30,
+        tone: str = "engaging"
+    ) -> str:
+        """Sync execution (not used)."""
+        import asyncio
+        return asyncio.run(self._arun(topic, platform, duration_seconds, tone))
+
+    async def _arun(
+        self,
+        topic: str,
+        platform: str = "tiktok",
+        duration_seconds: int = 30,
+        tone: str = "engaging"
+    ) -> str:
+        """
+        Async execution.
+
+        Args:
+            topic: Video topic
+            platform: Target platform
+            duration_seconds: Video length
+            tone: Script tone
+
+        Returns:
+            JSON string with script and metadata
+        """
+        try:
+            client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+            # Calculate word count (average speaking rate: 150 words/minute)
+            target_word_count = int((duration_seconds / 60) * 150)
+
+            # Build prompt
+            prompt = self._build_script_prompt(
+                topic, platform, duration_seconds, target_word_count, tone
+            )
+
+            # Call Claude
+            response = await client.messages.create(
+                model=settings.ANTHROPIC_MODEL,
+                max_tokens=1000,
+                temperature=0.7,
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }]
+            )
+
+            script = response.content[0].text
+
+            # Calculate cost
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            cost_usd = self._calculate_cost(input_tokens, output_tokens)
+
+            logger.info(
+                f"Generated script for '{topic}' "
+                f"({output_tokens} tokens, ${cost_usd:.4f})"
+            )
+
+            import json
+            return json.dumps({
+                "status": "success",
+                "script": script,
+                "word_count": len(script.split()),
+                "platform": platform,
+                "duration_seconds": duration_seconds,
+                "tokens": {
+                    "input": input_tokens,
+                    "output": output_tokens,
+                    "total": input_tokens + output_tokens
+                },
+                "cost_usd": cost_usd
+            }, indent=2)
+
+        except Exception as e:
+            logger.error(f"Script generation failed: {e}")
+            import json
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    def _build_script_prompt(
+        self,
+        topic: str,
+        platform: str,
+        duration_seconds: int,
+        target_word_count: int,
+        tone: str
+    ) -> str:
+        """Build Claude prompt for script generation."""
+
+        platform_guidelines = {
+            "tiktok": "TikTok format: Start with a hook, deliver value quickly, end with CTA",
+            "youtube_shorts": "YouTube Shorts: Grab attention early, provide clear value, encourage likes/subscribes"
+        }
+
+        return f"""You are an expert short-form video script writer.
+
+Task: Write a {duration_seconds}-second video script for {platform.upper()}.
+
+Topic: {topic}
+Target Word Count: {target_word_count} words
+Tone: {tone}
+Platform Guidelines: {platform_guidelines.get(platform, '')}
+
+Script Structure:
+1. HOOK (0-3 seconds): Grab attention immediately
+2. BODY ({duration_seconds-6} seconds): Deliver value, tell story, share insight
+3. CTA (last 3 seconds): Clear call-to-action
+
+Requirements:
+- Write in spoken language (conversational, not formal)
+- Use short sentences for easy reading
+- Include pauses where natural
+- Optimize for voiceover delivery
+- Stay within word count
+
+Format the output as:
+
+[HOOK]
+<hook text>
+
+[BODY]
+<body text>
+
+[CTA]
+<cta text>
+
+Begin writing the script now:"""
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate API cost based on token usage."""
+        costs = COST_PER_1K_TOKENS.get(settings.ANTHROPIC_MODEL, {
+            "input": 0.003,
+            "output": 0.015
+        })
+
+        input_cost = (input_tokens / 1000) * costs["input"]
+        output_cost = (output_tokens / 1000) * costs["output"]
+
+        return input_cost + output_cost

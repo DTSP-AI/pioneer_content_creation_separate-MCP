@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables (sensitive credentials)
+.env
+.env.local
+.env.*.local
+*.env
+.env.production
+.env.development
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+checkpoint.sqlite
+agent.db
+
+# Logs
+*.log
+logs/
+
+# Generated files
+videos/
+*.mp4
+*.mov
+*.avi
+video_logs.csv
+
+# OAuth tokens and credentials (NEVER COMMIT)
+token.pickle
+client_secret.json
+credentials.json
+*_credentials.json
+*_token.json
+*.pem
+*.key
+*secret*
+*api_key*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Streamlit
+.streamlit/
+
+# Documentation (ignore all .md except README.md)
+*.md
+!README.md
