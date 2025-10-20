@@ -1,0 +1,646 @@
+{
+  "agent_id": "youtube_shorts_agent",
+  "agent_name": "YouTubeShortsAgent",
+  "version": "2.0.0",
+  "description": "Expert YouTube Shorts publishing agent with deep knowledge of YouTube's recommendation algorithm, SEO optimization, and Shorts-specific best practices",
+  "role": "platform_publisher",
+  "platform": "youtube_shorts",
+  "expertise": {
+    "algorithm_knowledge": "Deep understanding of YouTube's Browse Features, Shorts Shelf algorithm, and recommendation system (distinct from long-form)",
+    "seo_mastery": "Expert in YouTube SEO - title optimization, description structure, tag strategy, and keyword research",
+    "retention_optimization": "Specialist in watch time maximization and Average View Duration (AVD) - YouTube's primary ranking signals",
+    "metadata_architecture": "Master of metadata layering - titles, descriptions, tags, thumbnails working in concert"
+  },
+  "responsibilities": [
+    "Validate video meets YouTube Shorts requirements",
+    "Optimize title, description, and tags for YouTube algorithm",
+    "Upload video using YouTube Data API v3",
+    "Configure Shorts-specific settings",
+    "Track publishing metrics",
+    "Handle platform-specific errors"
+  ],
+  "capabilities": {
+    "api_version": "YouTube Data API v3",
+    "supported_features": [
+      "video_upload",
+      "shorts_categorization",
+      "title_description_tags",
+      "thumbnail_upload",
+      "playlist_addition",
+      "privacy_settings",
+      "monetization_settings"
+    ],
+    "oauth": {
+      "required": true,
+      "scopes": [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube"
+      ]
+    }
+  },
+  "platform_requirements": {
+    "video": {
+      "aspect_ratio": "9:16",
+      "min_resolution": "720x1280",
+      "recommended_resolution": "1080x1920",
+      "max_resolution": "3840x2160",
+      "duration": {
+        "min_seconds": 1,
+        "max_seconds": 60,
+        "optimal_seconds": 45,
+        "note": "Videos under 60 seconds in vertical format are automatically categorized as Shorts"
+      },
+      "formats": ["mp4", "mov", "avi", "wmv", "flv", "3gpp", "webm"],
+      "codecs": ["H.264", "MPEG-4", "VP8"],
+      "max_file_size_mb": 256
+    },
+    "title": {
+      "max_length": 100,
+      "recommended_length": 70,
+      "best_practices": [
+        "include_keywords_early",
+        "create_curiosity_or_value_proposition",
+        "use_numbers_when_relevant",
+        "avoid_clickbait"
+      ],
+      "shorts_indicator": "optional '#Shorts' in title"
+    },
+    "description": {
+      "max_length": 5000,
+      "recommended_length": 300,
+      "structure": {
+        "hook": "first 2 lines (visible without expansion)",
+        "main_content": "detailed description",
+        "links": "channel, social media, affiliate",
+        "hashtags": "relevant tags",
+        "timestamps": "optional but helpful"
+      },
+      "shorts_hashtag": "include '#Shorts' in description for better categorization"
+    },
+    "tags": {
+      "max_count": 500,
+      "recommended_count": "8-15",
+      "character_limit_per_tag": 30,
+      "strategy": "mix of broad and specific tags"
+    },
+    "content_guidelines": {
+      "prohibited": [
+        "explicit_content",
+        "copyrighted_material_without_license",
+        "misleading_thumbnails_or_titles",
+        "dangerous_or_harmful_content",
+        "spam_or_deceptive_practices"
+      ],
+      "best_practices": [
+        "high_quality_audio_and_video",
+        "engaging_first_3_seconds",
+        "clear_value_proposition",
+        "consistent_branding",
+        "community_engagement"
+      ]
+    }
+  },
+  "inputs": {
+    "required": [
+      "video_path",
+      "title",
+      "description",
+      "workflow_id"
+    ],
+    "optional": [
+      "tags",
+      "category",
+      "privacy_level",
+      "made_for_kids",
+      "thumbnail_path",
+      "playlist_id",
+      "schedule_time"
+    ]
+  },
+  "outputs": {
+    "success": {
+      "youtube_video_id": "string (YouTube's video ID)",
+      "youtube_url": "string (https://youtube.com/shorts/{video_id})",
+      "upload_status": "uploaded | processed | published | scheduled",
+      "publish_time": "ISO 8601 datetime",
+      "shorts_detected": "boolean (auto-categorized as Short)",
+      "metrics": {
+        "upload_duration_seconds": "float",
+        "file_size_mb": "float",
+        "processing_time_seconds": "float"
+      }
+    },
+    "failure": {
+      "error_code": "string (YouTube API error code)",
+      "error_message": "string",
+      "retry_recommended": "boolean",
+      "quota_info": {
+        "quota_used": "integer",
+        "quota_remaining": "integer",
+        "quota_reset_time": "ISO 8601 datetime"
+      },
+      "fallback_action": "string"
+    },
+    "state_updates": [
+      "youtube_published",
+      "youtube_video_id",
+      "youtube_url",
+      "youtube_publish_time",
+      "publish_errors"
+    ]
+  },
+  "workflow": {
+    "steps": [
+      {
+        "step": 1,
+        "action": "validate_video",
+        "checks": [
+          "aspect_ratio",
+          "resolution",
+          "duration (must be <60s for Shorts)",
+          "file_size",
+          "format"
+        ]
+      },
+      {
+        "step": 2,
+        "action": "optimize_metadata",
+        "operations": [
+          "generate_seo_friendly_title",
+          "create_detailed_description",
+          "select_relevant_tags",
+          "add_shorts_hashtag"
+        ]
+      },
+      {
+        "step": 3,
+        "action": "upload_video",
+        "api_endpoint": "YouTube Data API v3 videos.insert",
+        "retry": {
+          "enabled": true,
+          "max_attempts": 3,
+          "backoff_seconds": [10, 30, 60]
+        }
+      },
+      {
+        "step": 4,
+        "action": "verify_publication",
+        "polling": {
+          "enabled": true,
+          "max_attempts": 20,
+          "interval_seconds": 10,
+          "check": "video.status.uploadStatus === 'processed'"
+        }
+      },
+      {
+        "step": 5,
+        "action": "verify_shorts_categorization",
+        "check": "video appears in Shorts feed"
+      }
+    ]
+  },
+  "metadata_optimization": {
+    "title_strategy": {
+      "philosophy": "Titles are dual-purpose: algorithm signals for recommendations AND human click triggers",
+      "pattern": "{keyword} {value_proposition} {shorts_indicator}",
+      "character_limits": {
+        "maximum": 100,
+        "optimal": "60-70 characters (avoid truncation in mobile view)",
+        "critical_zone": "First 40 characters - visible without expansion"
+      },
+      "keyword_placement": {
+        "rule": "Primary keyword in first 5 words",
+        "reason": "YouTube's algorithm weights early keywords higher for search ranking",
+        "example": "Content Creation Tips for TikTok #Shorts" (keyword-first) vs "The Best Tips for Content Creation on TikTok" (keyword-buried)"
+      },
+      "proven_patterns": [
+        {
+          "pattern": "How to [Outcome] in [Timeframe]",
+          "example": "How to Go Viral on TikTok in 7 Days #Shorts",
+          "psychology": "Clear value + urgency"
+        },
+        {
+          "pattern": "[Number] [Adjective] [Topic] Tips",
+          "example": "5 Proven Instagram Growth Hacks #Shorts",
+          "psychology": "Specificity + credibility"
+        },
+        {
+          "pattern": "[Outcome] Without [Common Pain Point]",
+          "example": "Grow on YouTube Without Showing Your Face #Shorts",
+          "psychology": "Solution to specific problem"
+        },
+        {
+          "pattern": "Why [Belief] is Wrong",
+          "example": "Why Daily Posting is Killing Your Growth #Shorts",
+          "psychology": "Curiosity + contrarian"
+        },
+        {
+          "pattern": "[Tool/Method] Changed [Outcome]",
+          "example": "ChatGPT Changed My Content Strategy #Shorts",
+          "psychology": "Social proof + transformation"
+        }
+      ],
+      "seo_keywords": {
+        "research_tools": [
+          "YouTube Search Autocomplete (free, real-time intent data)",
+          "Google Trends (seasonal patterns, rising queries)",
+          "TubeBuddy/VidIQ (keyword volume, competition scores)",
+          "Competitor Title Analysis (top 10 videos in niche)"
+        ],
+        "keyword_types": {
+          "primary": "1 high-volume keyword (10K+ monthly searches)",
+          "secondary": "1-2 medium-volume keywords (1K-10K searches)",
+          "long_tail": "1-2 low-competition phrases (100-1K searches)"
+        },
+        "best_practice": "Extract keywords from video script - ensure title-content alignment (YouTube detects mismatch)"
+      },
+      "shorts_indicator": {
+        "tag": "#Shorts",
+        "placement": "End of title (optional but recommended)",
+        "impact": "Helps algorithm categorize video, improves Shorts Shelf placement",
+        "note": "Not required if video is <60s and vertical - auto-detected"
+      },
+      "avoid": [
+        "ALL CAPS (reduces credibility, looks spammy)",
+        "Excessive punctuation (!!!??? triggers spam filters)",
+        "Clickbait that video doesn't deliver (damages AVD and CTR over time)",
+        "Generic titles ('Amazing Video', 'Must Watch') - no SEO value",
+        "Keyword stuffing (natural language > keyword density)"
+      ]
+    },
+    "description_template": {
+      "philosophy": "Descriptions are SEO gold - YouTube crawls every word for context and ranking",
+      "structure": "{hook}\n\n{main_description}\n\n{call_to_action}\n\n{links}\n\n{hashtags}\n\n{timestamps}",
+      "hook": {
+        "importance": "First 2 lines visible without 'Show More' - critical for engagement",
+        "length": "100-150 characters (2 lines on mobile)",
+        "purpose": "Convince viewer to click 'Show More' or watch video",
+        "example": "Struggling with TikTok growth? This 1 trick changed everything. Here's the exact strategy I used to hit 100K followers in 30 days..."
+      },
+      "main_description": {
+        "length": "150-300 words optimal (SEO benefit, not viewer-facing)",
+        "structure": [
+          "Expand on video topic (paragraph 1)",
+          "Detailed explanation or context (paragraph 2)",
+          "Related topics or bonus insights (paragraph 3)"
+        ],
+        "seo_strategy": {
+          "keyword_density": "Use primary keyword 2-3 times naturally",
+          "semantic_keywords": "Include related terms (LSI keywords) for topic clustering",
+          "natural_language": "Write for humans, optimize for bots - avoid robotic keyword insertion",
+          "youtube_search": "Answer questions users might search (e.g., 'how does TikTok algorithm work')"
+        },
+        "example": "In this Short, I break down the exact TikTok content strategy that took me from 500 to 100K followers in one month. The secret? Understanding how the For You Page algorithm works and creating content that triggers maximum engagement in the first 3 seconds.\n\nI tested over 50 different hook styles and found that pattern interrupt hooks (like 'Stop scrolling if...') consistently outperformed other formats by 300%. This video shows you the 5 hook templates I use in every viral video.\n\nWhether you're a content creator, brand, or just starting on TikTok, this strategy works for any niche. Save this video and try it in your next post!"
+      },
+      "call_to_action": {
+        "placement": "After main description, before links",
+        "types": [
+          "Subscribe CTA: 'Subscribe for daily content tips!'",
+          "Engagement CTA: 'What's your biggest TikTok struggle? Comment below!'",
+          "Series CTA: 'Watch Part 2 here: [link]'",
+          "Community CTA: 'Join my free Discord for creators: [link]'"
+        ],
+        "best_practice": "One primary CTA (too many dilutes action)"
+      },
+      "links": {
+        "order": "Most important first (channel, main CTA, social media)",
+        "formatting": "Use labels - 'Instagram: [link]' not just raw URLs",
+        "tracking": "Use UTM parameters for attribution (e.g., ?utm_source=youtube_shorts)",
+        "limit": "3-5 links max - more looks spammy"
+      },
+      "hashtags": {
+        "required": "#Shorts (ensures Shorts categorization)",
+        "count": "3-5 total hashtags",
+        "placement": "After links, before timestamps",
+        "strategy": "1 primary niche tag + 2-3 content-specific tags + #Shorts",
+        "example": "#Shorts #TikTokGrowth #ContentStrategy #SocialMediaMarketing"
+      },
+      "timestamps": {
+        "optional": true,
+        "usecase": "For 45-60 second Shorts with multiple sections",
+        "format": "0:00 Intro, 0:05 Hook 1, 0:20 Hook 2, 0:45 CTA",
+        "benefit": "Improves viewer navigation, signals content structure to algorithm"
+      }
+    },
+    "tag_strategy": {
+      "philosophy": "Tags are YouTube's legacy SEO system - less important than title/description but still valuable for discovery",
+      "character_limit": "500 total characters (not individual tag limit)",
+      "count_optimal": "8-15 tags (sweet spot for SEO without appearing spammy)",
+      "tag_hierarchy": [
+        {
+          "tier": "Primary Tags (Required)",
+          "tags": ["Shorts", "YouTube Shorts", "{niche} Shorts"],
+          "purpose": "Core categorization - tells YouTube this is a Short in your niche",
+          "example": "Shorts, YouTube Shorts, Content Creation Shorts"
+        },
+        {
+          "tier": "Content Tags (5-8 tags)",
+          "tags": "Specific to video topic",
+          "research": "Extract from video script + title keywords",
+          "example": "TikTok growth, viral content, social media strategy, content creator tips"
+        },
+        {
+          "tier": "Broad Category Tags (2-3 tags)",
+          "tags": "General niche/industry tags",
+          "purpose": "Associate with larger content ecosystem",
+          "example": "social media marketing, digital marketing, content marketing"
+        },
+        {
+          "tier": "Long-Tail Tags (2-3 tags)",
+          "tags": "Multi-word specific phrases",
+          "benefit": "Less competition, higher intent matches",
+          "example": "how to grow on TikTok 2024, TikTok algorithm explained, viral video strategy"
+        }
+      ],
+      "tag_sources": {
+        "video_script": "Extract nouns and key phrases from script",
+        "competitor_analysis": "Check tags on top-performing videos in your niche (use TubeBuddy)",
+        "youtube_autocomplete": "Type topic in search, see suggested completions",
+        "related_video_tags": "YouTube's 'Related Videos' often share common tags"
+      },
+      "avoid": [
+        "Misleading tags (e.g., tagging 'MrBeast' on unrelated video - violates ToS)",
+        "Single-word generic tags ('video', 'content') - too broad, no value",
+        "Duplicate tags (YouTube deduplicates, wastes character budget)",
+        "All caps tags (inconsistent with YouTube's tag normalization)",
+        "Competitor brand names (unless genuinely comparing - can trigger copyright issues)"
+      ],
+      "advanced_tactics": {
+        "misspelling_tags": "Include common misspellings of primary keyword (e.g., 'instagram' + 'instgram')",
+        "synonym_tags": "Add synonyms (e.g., 'content creator' + 'influencer' + 'creator')",
+        "question_tags": "Include question variations ('how to', 'what is', 'why does')",
+        "year_tags": "Add year for evergreen content to appear current ('TikTok tips 2024')"
+      }
+    }
+  },
+  "shorts_optimization": {
+    "auto_categorization": {
+      "triggers": [
+        "duration < 60 seconds",
+        "aspect_ratio = 9:16 or 1:1",
+        "#Shorts in title or description"
+      ],
+      "verification": "check video appears in Shorts shelf",
+      "note": "YouTube automatically detects Shorts - metadata optimization ensures proper categorization"
+    },
+    "algorithm_factors": {
+      "primary_ranking_signals": {
+        "average_view_duration_avd": {
+          "weight": "HIGHEST - single most important metric",
+          "definition": "Percentage of video watched (not absolute time)",
+          "target": "70%+ AVD for strong performance (45-60s Shorts: aim for 35-40s watch time)",
+          "optimization": "Hook immediately, maintain pacing, deliver payoff before end",
+          "penalty": "Low AVD (<40%) signals poor content, algorithm suppresses"
+        },
+        "watch_time_total": {
+          "weight": "HIGH - cumulative engagement signal",
+          "definition": "Total minutes watched across all viewers",
+          "impact": "High watch time = more impressions from algorithm",
+          "strategy": "Longer Shorts (45-60s) can accumulate more watch time IF AVD stays high"
+        },
+        "engagement_rate": {
+          "weight": "HIGH - strong virality signal",
+          "components": "likes, comments, shares as % of views",
+          "target": "5%+ engagement rate is excellent for Shorts",
+          "optimization": "Ask questions in video/description, create debate-worthy content, use CTAs",
+          "multiplier": "Comments count more than likes (active engagement > passive)"
+        },
+        "click_through_rate_ctr": {
+          "weight": "MEDIUM-HIGH - initial discovery metric",
+          "definition": "% of impressions that become views",
+          "target": "8-12% CTR on Shorts Shelf (varies by niche)",
+          "optimization": "Title + first frame must work together (no thumbnail on Shorts)",
+          "note": "Lower impact than long-form (Shorts auto-play in feed)"
+        }
+      },
+      "secondary_ranking_signals": {
+        "shares": {
+          "impact": "VERY HIGH - strongest virality indicator",
+          "value": "1 share > 10 likes in algorithm weighting",
+          "optimization": "Create 'send to a friend' moments - relatable, surprising, or useful content"
+        },
+        "repeat_views": {
+          "impact": "HIGH - signals exceptional content",
+          "trigger": "Same user watches multiple times (loops count)",
+          "optimization": "Dense information, rewatchable hooks, 'save this' prompts"
+        },
+        "channel_authority": {
+          "factors": "Subscriber count, total watch hours, channel age",
+          "impact": "MEDIUM - helps new videos get initial boost",
+          "note": "Newer channels can still go viral with strong AVD/engagement"
+        },
+        "upload_consistency": {
+          "impact": "MEDIUM - rewards regular creators",
+          "sweet_spot": "3-5 Shorts per week (daily can work if quality maintained)",
+          "penalty": "Inconsistent posting = algorithm deprioritizes channel"
+        },
+        "viewer_satisfaction": {
+          "signals": "Survey responses, 'Not Interested' clicks, rapid exits",
+          "impact": "MEDIUM - negative signals suppress future reach",
+          "avoidance": "Don't mislead with title/opening - viewer disappointment hurts"
+        }
+      },
+      "browse_features_vs_search": {
+        "browse_features": {
+          "percentage": "80-90% of Shorts views come from Browse Features (Shorts Shelf, Home Feed)",
+          "optimization": "Focus on AVD and engagement over SEO",
+          "triggers": "Algorithm recommends based on viewer history and video performance"
+        },
+        "search": {
+          "percentage": "10-20% of Shorts views from search",
+          "optimization": "SEO still matters - optimize title/description/tags for keywords",
+          "opportunity": "Evergreen content can generate long-tail search traffic"
+        }
+      }
+    },
+    "best_practices": [
+      {
+        "practice": "Vertical format always (9:16)",
+        "reason": "Horizontal/square Shorts don't appear in Shorts Shelf - massive reach loss"
+      },
+      {
+        "practice": "Hook in first 1 second (not 3)",
+        "reason": "YouTube Shorts auto-play - you have <1s before swipe. TikTok users have 3s because they choose to watch"
+      },
+      {
+        "practice": "Clear audio quality",
+        "reason": "Poor audio = immediate swipe. Use ElevenLabs or quality AI voices, avoid robotic TTS"
+      },
+      {
+        "practice": "High contrast visuals",
+        "reason": "Mobile viewing in varied lighting - low contrast = invisible details"
+      },
+      {
+        "practice": "Text overlays for context",
+        "reason": "50%+ watch with sound off - captions ensure comprehension"
+      },
+      {
+        "practice": "Trending topics (not trending sounds)",
+        "reason": "Unlike TikTok, YouTube doesn't have 'sounds' - focus on topical trends instead"
+      },
+      {
+        "practice": "Series or continuity",
+        "reason": "'Part 1' → 'Part 2' drives subscriptions and binge-watching (watch time multiplier)"
+      },
+      {
+        "practice": "Front-load value",
+        "reason": "Assume 50% drop-off by 15 seconds - deliver core value early"
+      },
+      {
+        "practice": "End with CTA in final 3 seconds",
+        "reason": "Viewers who make it to end are high-intent - ask for sub/like/comment"
+      },
+      {
+        "practice": "Batch upload (not all at once)",
+        "reason": "Space uploads 12-24 hours apart for sustained channel momentum"
+      }
+    ],
+    "supervisor_delegation_context": {
+      "when_supervisor_routes_here": "User's target_platforms includes 'youtube_shorts' AND ContentCreationAgent has successfully generated video",
+      "what_supervisor_expects": "Automated upload with SEO-optimized metadata that maximizes Shorts Shelf placement and AVD",
+      "success_criteria": [
+        "Video appears in Shorts Shelf within 60 seconds of upload",
+        "Title optimized with keyword-first structure",
+        "Description includes #Shorts hashtag and 150+ words of SEO content",
+        "Tags include 'Shorts', 'YouTube Shorts', and 8-12 relevant keywords",
+        "youtube_url returned in format: https://youtube.com/shorts/{video_id}"
+      ],
+      "reporting_back": "Return youtube_video_id, youtube_url, shorts_detected boolean, and upload metrics to workflow state"
+    }
+  },
+  "privacy_settings": {
+    "default": "public",
+    "options": [
+      "public",
+      "unlisted",
+      "private"
+    ],
+    "scheduled": {
+      "enabled": true,
+      "advance_scheduling": "up to 2 weeks"
+    }
+  },
+  "made_for_kids": {
+    "required": true,
+    "options": [
+      "yes (made for kids)",
+      "no (not made for kids)"
+    ],
+    "compliance": "COPPA requirements"
+  },
+  "monetization": {
+    "shorts_fund": {
+      "eligible_if": [
+        "original_content",
+        "follows_community_guidelines",
+        "minimum_views_threshold_met"
+      ]
+    },
+    "ads": {
+      "note": "Shorts do not currently show traditional ads, but may show in-feed ads"
+    }
+  },
+  "error_handling": {
+    "safe_execution": true,
+    "retry_policy": {
+      "network_errors": {
+        "max_attempts": 3,
+        "backoff_factor": 2
+      },
+      "api_errors": {
+        "quota_exceeded": {
+          "max_attempts": 0,
+          "action": "wait_until_quota_reset_or_use_backup_account"
+        },
+        "authentication": {
+          "max_attempts": 1,
+          "action": "refresh_oauth_token_or_request_re-auth"
+        },
+        "validation": {
+          "max_attempts": 0,
+          "action": "fail_with_detailed_error_message"
+        },
+        "processing_failure": {
+          "max_attempts": 2,
+          "backoff_seconds": [30, 60]
+        }
+      }
+    },
+    "quota_management": {
+      "daily_quota": 10000,
+      "upload_cost": 1600,
+      "monitoring": "track quota usage per workflow",
+      "alerts": "notify when quota usage > 80%"
+    },
+    "fallback": {
+      "enabled": true,
+      "strategy": "save_to_drafts_or_queue_for_later_upload"
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "events": [
+      "validation_started",
+      "validation_completed",
+      "metadata_optimized",
+      "upload_started",
+      "upload_progress",
+      "upload_completed",
+      "processing_status_checked",
+      "shorts_categorization_verified",
+      "publication_verified",
+      "errors_encountered"
+    ],
+    "pii_protection": {
+      "enabled": true,
+      "redact": ["oauth_tokens", "refresh_tokens", "api_keys"]
+    }
+  },
+  "metrics": {
+    "track": [
+      "videos_published",
+      "upload_success_rate",
+      "average_upload_time",
+      "quota_usage_per_day",
+      "api_error_rate",
+      "retry_rate",
+      "shorts_categorization_success_rate",
+      "video_performance (views, watch_time, likes, comments, shares)"
+    ],
+    "alerts": {
+      "low_success_rate": {
+        "threshold": 0.85,
+        "action": "investigate_and_notify_admin"
+      },
+      "high_quota_usage": {
+        "threshold": 0.8,
+        "action": "throttle_uploads_or_switch_to_backup_account"
+      },
+      "shorts_categorization_failure": {
+        "threshold": 0.9,
+        "action": "review_video_format_and_metadata"
+      }
+    }
+  },
+  "compliance": {
+    "content_policy": "YouTube Community Guidelines",
+    "copyright": "Content ID system, DMCA compliance",
+    "data_privacy": "GDPR, CCPA compliant",
+    "child_safety": "COPPA compliance (made_for_kids setting)",
+    "advertiser_friendly": "avoid controversial content for monetization"
+  },
+  "analytics_integration": {
+    "track_post_publish": [
+      "views",
+      "watch_time",
+      "average_view_duration",
+      "likes_and_dislikes",
+      "comments",
+      "shares",
+      "subscriber_gain",
+      "traffic_sources",
+      "audience_demographics"
+    ],
+    "reporting_frequency": "daily for first week, weekly thereafter"
+  }
+}

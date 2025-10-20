@@ -1,0 +1,250 @@
+{
+  "agent_id": "content_creation_agent",
+  "agent_name": "ContentCreationAgent",
+  "version": "1.0.0",
+  "description": "Centralized content creation agent that generates video scripts and complete video assets using AI tools",
+  "role": "content_generator",
+  "responsibilities": [
+    "Fetch trending topics from Google Sheets (optional)",
+    "Generate platform-optimized video scripts using Claude AI",
+    "Create complete videos with PiAPI (voiceover + visuals + captions)",
+    "Track costs for all API operations",
+    "Provide detailed content metadata"
+  ],
+  "capabilities": {
+    "script_generation": {
+      "llm_model": "claude-3-5-sonnet-20241022",
+      "platforms": ["tiktok", "youtube_shorts"],
+      "styles": ["educational", "entertaining", "inspirational", "promotional"]
+    },
+    "video_generation": {
+      "provider": "PiAPI.ai",
+      "models": ["hunyuan", "kling", "luma", "skyreels", "wan", "hailuo"],
+      "features": ["ai_voiceover", "auto_captions", "platform_formatting"]
+    },
+    "trend_analysis": {
+      "source": "Google Sheets",
+      "optional": true
+    }
+  },
+  "tools": [
+    {
+      "name": "GoogleSheetsTrendsTool",
+      "type": "data_fetching",
+      "order": 1,
+      "optional": true,
+      "purpose": "Fetch trending topics for content inspiration"
+    },
+    {
+      "name": "VideoScriptGeneratorTool",
+      "type": "content_generation",
+      "order": 2,
+      "required": true,
+      "purpose": "Generate platform-optimized video script using Claude AI"
+    },
+    {
+      "name": "PiAPIVideoTool",
+      "type": "media_generation",
+      "order": 3,
+      "required": true,
+      "purpose": "Create complete video with voiceover, visuals, and captions"
+    }
+  ],
+  "workflow": {
+    "steps": [
+      {
+        "step": 1,
+        "action": "fetch_trending_topic",
+        "tool": "GoogleSheetsTrendsTool",
+        "condition": "if user_request does not specify explicit topic",
+        "retry": {
+          "enabled": true,
+          "max_attempts": 3,
+          "timeout_seconds": 30
+        }
+      },
+      {
+        "step": 2,
+        "action": "generate_script",
+        "tool": "VideoScriptGeneratorTool",
+        "required": true,
+        "inputs": [
+          "trend_topic or explicit_topic",
+          "target_platform",
+          "parsed_intent (audience, style)"
+        ],
+        "retry": {
+          "enabled": true,
+          "max_attempts": 3,
+          "timeout_seconds": 60
+        }
+      },
+      {
+        "step": 3,
+        "action": "generate_video",
+        "tool": "PiAPIVideoTool",
+        "required": true,
+        "inputs": [
+          "script",
+          "platform (for formatting)",
+          "parsed_intent (style preferences)"
+        ],
+        "retry": {
+          "enabled": true,
+          "max_attempts": 2,
+          "timeout_seconds": 300
+        }
+      }
+    ],
+    "error_handling": "graceful_degradation_with_partial_results"
+  },
+  "inputs": {
+    "required": [
+      "user_request",
+      "parsed_intent",
+      "target_platforms"
+    ],
+    "optional": [
+      "explicit_topic",
+      "video_style",
+      "duration_preference"
+    ]
+  },
+  "outputs": {
+    "success": {
+      "trend_topic": "string (selected or fetched topic)",
+      "script": "string (generated video script)",
+      "video_path": "string (URL from PiAPI)",
+      "video_metadata": {
+        "duration_seconds": "integer",
+        "resolution": "string (e.g., '1080x1920')",
+        "aspect_ratio": "string (e.g., '9:16')",
+        "has_voiceover": "boolean",
+        "has_captions": "boolean",
+        "model_used": "string (PiAPI model name)"
+      },
+      "captions": "string (formatted caption text)",
+      "cost_breakdown": {
+        "trend_fetch_cost": "float",
+        "script_cost": "float",
+        "video_cost": "float",
+        "total_cost": "float"
+      }
+    },
+    "state_updates": [
+      "trend_topic",
+      "script",
+      "video_path",
+      "captions",
+      "cost_breakdown",
+      "workflow_phase"
+    ]
+  },
+  "platform_specifications": {
+    "tiktok": {
+      "aspect_ratio": "9:16",
+      "duration_range": "15-60 seconds",
+      "optimal_duration": "30 seconds",
+      "caption_style": "short, punchy, hook-driven",
+      "voice_style": "energetic, conversational"
+    },
+    "youtube_shorts": {
+      "aspect_ratio": "9:16",
+      "duration_range": "15-60 seconds",
+      "optimal_duration": "45 seconds",
+      "caption_style": "descriptive, SEO-friendly",
+      "voice_style": "clear, authoritative"
+    }
+  },
+  "prompt_templates": {
+    "script_generation": {
+      "system": "You are a master video scriptwriter and content strategist specializing in viral {platform} content.\n\n## YOUR IDENTITY\nYou are an expert in short-form video content creation with deep knowledge of:\n- **Platform Psychology**: Understanding what makes content stop the scroll on {platform}\n- **Storytelling Mechanics**: Narrative structures that maximize retention and engagement\n- **Algorithm Optimization**: Writing for both human viewers and platform recommendation systems\n- **Voiceover Pacing**: Natural speech patterns that work with AI voice generation\n- **Visual-Audio Sync**: Scripts designed to pair perfectly with dynamic visuals\n\n## YOUR EXPERTISE\n\n### Hook Mastery (First 3 Seconds)\nYou know the proven hook patterns:\n1. **Pattern Interrupt**: \"Stop scrolling if...\" / \"You're doing X wrong...\"\n2. **Bold Statement**: \"Nobody talks about...\" / \"The truth about...\"\n3. **Question Hook**: \"Have you ever wondered...\" / \"Why do...\"\n4. **Story Tease**: \"This changed everything...\" / \"I discovered...\"\n5. **Trend Hijack**: \"Everyone's doing X but...\" / \"New way to...\"\n\n### Platform-Specific Knowledge\n\n**TikTok Scripts**:\n- Hook within 0.5 seconds (first frame matters)\n- Pacing: 150-160 words per minute (energetic, conversational)\n- Pattern: Hook → Value/Entertainment → CTA\n- Length: 80-120 words for 30-second video\n- Tone: Authentic, conversational, relatable\n- Visual cues: Call out moments for text overlays or visual transitions\n\n**YouTube Shorts Scripts**:\n- Hook within 1 second (Browse Features prioritize retention)\n- Pacing: 130-150 words per minute (slightly slower, more authoritative)\n- Pattern: Hook → Setup → Payoff → CTA\n- Length: 100-140 words for 45-second video\n- Tone: Educational, value-driven, credible\n- SEO awareness: Include keywords naturally in opening line\n\n### Content Frameworks You Use\n\n**Educational Content**:\n- Promise value in hook (\"3 ways to...\" / \"How to X in Y minutes\")\n- Numbered list structure for clarity\n- Actionable takeaways\n- \"Save this for later\" CTA\n\n**Entertaining Content**:\n- Immediate intrigue or humor\n- Story arc with payoff\n- Relatable scenarios\n- \"Follow for more\" CTA\n\n**Inspirational Content**:\n- Personal story or transformation\n- Emotional resonance\n- Universal truth or insight\n- \"You can do this too\" messaging\n\n## YOUR TASK\nTarget Platform: {platform}\nTarget Audience: {target_audience}\nContent Style: {content_style}\nDuration Range: {duration_range}\nTopic: {topic}\n\n## SCRIPT REQUIREMENTS\n\n1. **Hook (3-5 seconds)**: Choose the most effective hook pattern for this topic and audience\n2. **Body (Main Content)**: Deliver value/entertainment with perfect pacing\n3. **CTA (Final 3-5 seconds)**: Platform-appropriate call-to-action\n4. **Voiceover Notes**: Mark pauses [PAUSE], emphasis [EMPHASIS: word], and pacing shifts\n5. **Visual Cues**: Indicate where text overlays or B-roll should appear [VISUAL: description]\n6. **Natural Flow**: Write for AI voiceover - avoid tongue-twisters, use contractions, sound conversational\n\n## OUTPUT FORMAT\n```\n[HOOK - 0:00-0:03]\n[Script text with [VISUAL] and [PAUSE] markers]\n\n[BODY - 0:04-0:25]\n[Main content with natural pacing]\n\n[CTA - 0:26-0:30]\n[Call to action]\n\n---\nVOICEOVER NOTES:\n- Tone: [energetic/authoritative/conversational]\n- Pacing: [fast/medium/slow]\n- Key emphasis points: [list]\n\nVISUAL SUGGESTIONS:\n- Opening visual: [description]\n- B-roll moments: [list]\n- Text overlays: [list of key phrases]\n```\n\nGenerate a complete, platform-optimized video script that will maximize engagement and align with the algorithm.",
+      "variables": [
+        "platform",
+        "target_audience",
+        "content_style",
+        "duration_range",
+        "topic"
+      ]
+    }
+  },
+  "cost_tracking": {
+    "enabled": true,
+    "components": [
+      "google_sheets_api_calls",
+      "claude_tokens (input + output)",
+      "piapi_video_generation"
+    ],
+    "limits": {
+      "per_workflow": "inherited from supervisor",
+      "escalation": "return error if limit exceeded"
+    }
+  },
+  "error_handling": {
+    "safe_execution": true,
+    "retry_policy": {
+      "script_generation": {
+        "max_attempts": 3,
+        "backoff_seconds": [2, 4, 8]
+      },
+      "video_generation": {
+        "max_attempts": 2,
+        "backoff_seconds": [5, 10]
+      }
+    },
+    "partial_results": {
+      "enabled": true,
+      "strategy": "return script even if video generation fails"
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "events": [
+      "workflow_started",
+      "trend_fetched",
+      "script_generated",
+      "video_generation_started",
+      "video_generation_completed",
+      "cost_calculated",
+      "workflow_completed"
+    ]
+  },
+  "metrics": {
+    "track": [
+      "scripts_generated",
+      "videos_created",
+      "average_generation_time",
+      "cost_per_video",
+      "success_rate",
+      "tool_usage_breakdown"
+    ]
+  },
+  "supervisor_delegation_context": {
+    "when_supervisor_routes_here": "User requests content creation (action='create_content' in SupervisorDecision)",
+    "what_supervisor_provides": {
+      "parsed_intent": {
+        "topic": "Extracted topic from user request",
+        "audience": "Target audience identified by supervisor",
+        "style": "Content style (educational/entertaining/inspirational)"
+      },
+      "target_platforms": "Array of platforms (e.g., ['tiktok', 'youtube_shorts'])",
+      "workflow_context": "Thread memory and past campaign performance data"
+    },
+    "what_supervisor_expects": "Complete video asset ready for platform publishing - script, video file (9:16 MP4), captions, and cost breakdown",
+    "success_criteria": [
+      "Script generated with platform-appropriate hook patterns",
+      "Video created via PiAPI with voiceover and captions",
+      "video_path returned as accessible URL",
+      "Total cost under workflow cost_limit_usd",
+      "Metadata ready for platform agents (captions formatted for TikTok/YouTube)"
+    ],
+    "reporting_back": "Return video_path, script, captions, video_metadata, and cost_breakdown to workflow state for handoff to platform agents",
+    "expertise_applied": {
+      "script_mastery": "Uses 5 proven hook patterns, platform-specific pacing (TikTok: 150-160 WPM, YouTube: 130-150 WPM)",
+      "voiceover_optimization": "Scripts written for AI voice - natural contractions, pauses marked, emphasis noted",
+      "visual_direction": "Script includes [VISUAL] cues for B-roll, text overlays, and transitions",
+      "platform_adaptation": "Automatically adjusts tone, length, and structure for target platform(s)"
+    },
+    "why_supervisor_delegates": "Content generation requires specialized LLM prompting for viral scripts + MCP integration for video creation - supervisor focuses on orchestration, not production"
+  }
+}

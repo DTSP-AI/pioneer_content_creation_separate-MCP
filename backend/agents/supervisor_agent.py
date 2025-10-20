@@ -11,10 +11,11 @@ Architecture Compliance:
 - Returns state updates (Dict[str, Any])
 - No side effects outside state updates
 
-Pattern adopted from mcp-voice-agent:
-- Supervisor uses LLM to analyze request + memory context
-- Structured output for routing decisions
-- Campaign history awareness for better recommendations
+Pattern adapted from supervisor_READONLY_AGENTEXMPL.py:
+- Agent JSON contract as source of truth for prompts
+- ChatPromptTemplate with history and placeholders
+- Unified response processor for memory injection
+- Structured output for transparent routing decisions
 """
 
 from typing import Dict, Any, Literal, List
@@ -24,11 +25,17 @@ from pydantic import BaseModel, Field
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain.prompts import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+    MessagesPlaceholder,
+)
 
 from backend.state.state_schema import VideoWorkflowState, update_workflow_phase
 from backend.config import get_settings
-from backend.memory.manager import MemoryManager
-from backend.graph.error_recovery import safe_node_execution
+from backend.memory import MemoryManager
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -43,6 +50,8 @@ class SupervisorDecision(BaseModel):
     Structured output for supervisor routing decisions.
 
     LLM returns this schema to make routing transparent and debuggable.
+
+    This is the standardized JSON contract for agent responses.
     """
     action: Literal["create_content", "clarify", "reject"] = Field(
         description="Action to take: create_content (proceed), clarify (need more info), reject (invalid request)"
@@ -77,22 +86,166 @@ class SupervisorDecision(BaseModel):
     )
 
 
-@safe_node_execution("supervisor")
+# =============================================================================
+# LangChain Prompt Template & Chain (Contract-Driven Pattern)
+# =============================================================================
+
+def create_supervisor_chain(
+    agent_config: Dict[str, Any],
+    memory_context: Dict[str, Any],
+    cost_info: Dict[str, float]
+) -> tuple[ChatPromptTemplate, Any]:
+    """
+    Create LangChain prompt template and chain from agent JSON contract.
+
+    This function implements the pattern from supervisor_READONLY_AGENTEXMPL.py:
+    1. Load system prompt from agent contract
+    2. Format with current context (memory, cost, etc.)
+    3. Build ChatPromptTemplate with history support
+    4. Create chain: prompt_template | llm
+
+    Args:
+        agent_config: Agent configuration from registry (JSON contract)
+        memory_context: Memory context dict (campaigns, messages, etc.)
+        cost_info: Cost tracking info (daily_cost_usd, max_daily_cost_usd, etc.)
+
+    Returns:
+        Tuple of (prompt_template, chain)
+    """
+    # Get base system prompt from agent contract
+    system_prompt_template = agent_config.get("prompt_template", {}).get("system", "")
+
+    if not system_prompt_template:
+        raise ValueError(f"Agent config missing prompt_template.system")
+
+    # Format memory context
+    memory_str = _format_memory_context(memory_context)
+    campaign_history_str = _format_campaign_history(memory_context.get("campaign_history", []))
+
+    # Format system prompt with current context
+    system_prompt = system_prompt_template.format(
+        memory_context=memory_str,
+        campaign_history=campaign_history_str,
+        daily_cost_usd=cost_info.get("daily_cost_usd", 0.0),
+        max_daily_cost_usd=cost_info.get("max_daily_cost_usd", 50.0),
+        cost_limit_usd=cost_info.get("cost_limit_usd", 5.0)
+    )
+
+    # Build ChatPromptTemplate with history support
+    prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template(system_prompt),
+        MessagesPlaceholder(variable_name="history"),
+        HumanMessagePromptTemplate.from_template("{user_input}")
+    ])
+
+    # Create LLM with structured output
+    llm = ChatOpenAI(
+        model=settings.OPENAI_MODEL,
+        temperature=0.3,
+        api_key=settings.OPENAI_API_KEY
+    )
+    llm_with_structure = llm.with_structured_output(SupervisorDecision)
+
+    # Create chain
+    chain = prompt_template | llm_with_structure
+
+    logger.info(f"Created supervisor chain with {len(system_prompt)} char system prompt")
+
+    return prompt_template, chain
+
+
+def process_supervisor_response(
+    user_input: str,
+    decision: SupervisorDecision,
+    memory_context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Unified response processor for supervisor decisions.
+
+    This function implements the pattern from supervisor_READONLY_AGENTEXMPL.py:
+    - process_ai_response(user_input, ai_response)
+    - inject_relevant_url(user_input, ai_response)
+
+    In our case, we inject memory context, campaign references, and
+    generate user-friendly chat responses.
+
+    Args:
+        user_input: Original user request
+        decision: SupervisorDecision from LLM
+        memory_context: Retrieved memory context
+
+    Returns:
+        Dict with processed response data
+    """
+    try:
+        # Generate conversational chat response
+        chat_response = _generate_chat_response_from_decision(
+            decision=decision,
+            user_input=user_input,
+            memory_context=memory_context
+        )
+
+        # Inject memory references if available
+        chat_response = _inject_memory_references(chat_response, memory_context)
+
+        return {
+            "chat_response": chat_response,
+            "decision": decision.model_dump(),
+            "memory_injected": True,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing supervisor response: {e}", exc_info=True)
+        # Fallback to basic response
+        return {
+            "chat_response": f"Processing your request: {user_input}",
+            "decision": decision.model_dump(),
+            "memory_injected": False,
+            "error": str(e)
+        }
+
+
+def _inject_memory_references(response: str, memory_context: Dict[str, Any]) -> str:
+    """
+    Inject memory references into response (similar to inject_relevant_url).
+
+    This adds contextual references to past campaigns, user preferences, etc.
+
+    Args:
+        response: Original response text
+        memory_context: Memory context with campaigns and preferences
+
+    Returns:
+        Response with memory references injected
+    """
+    campaigns = memory_context.get("campaign_history", [])
+
+    # If there are relevant campaigns, add reference
+    if campaigns and "similar" in response.lower():
+        latest_campaign = campaigns[0]
+        timestamp = latest_campaign.get("timestamp", "recently")
+        response += f"\n\n_Reference: Your campaign from {timestamp} is similar._"
+
+    return response
+
+
 async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
     """
-    SupervisorAgent (Enhanced) - Intelligent entry node with memory awareness.
+    SupervisorAgent (Enhanced with LangChain Pattern).
+
+    Implements contract-driven prompt template pattern from supervisor_READONLY_AGENTEXMPL.py:
+    1. Load agent config from JSON contract
+    2. Create ChatPromptTemplate with history support
+    3. Build chain: prompt_template | llm
+    4. Invoke chain with user_input and conversation history
+    5. Process response with unified response processor
 
     Responsibilities:
-    1. Retrieve memory context (past campaigns, conversation history)
-    2. Use LLM to analyze request + make routing decision
-    3. Check cost limits (daily + per-workflow)
-    4. Route to ContentCreationAgent or return clarification/rejection
-
-    Enhanced Features:
-    - LLM-based intent analysis (vs simple keywords)
-    - Memory-aware recommendations (learns from past campaigns)
-    - Structured output for transparency
-    - Campaign history awareness
+    - Retrieve memory context (past campaigns, conversation history)
+    - Use LLM chain to analyze request + make routing decision
+    - Check cost limits (daily + per-workflow)
+    - Route to ContentCreationAgent or return clarification/rejection
 
     Args:
         state: Current workflow state
@@ -101,14 +254,14 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
         Dict with state updates to merge
     """
     try:
-        logger.info(f"SupervisorAgent (enhanced) started for workflow: {state.get('workflow_id')}")
+        logger.info(f"SupervisorAgent (LangChain pattern) started for workflow: {state.get('workflow_id')}")
 
         # Extract input
         user_request = state.get("user_request", "")
         target_platforms = state.get("target_platforms", ["tiktok", "youtube_shorts"])
         cost_limit_usd = state.get("cost_limit_usd", settings.MAX_PER_WORKFLOW_COST_USD)
         tenant_id = state.get("tenant_id", "default-tenant")
-        agent_id = state.get("agent_id", "supervisor-agent")
+        agent_id = "supervisor_agent"
         thread_id = state.get("thread_id", "default-thread")
 
         # Validate input
@@ -118,7 +271,15 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
         if not target_platforms:
             raise ValueError("target_platforms must contain at least one platform")
 
-        # STEP 1: Retrieve memory context (Mem0 + Qdrant + campaign history)
+        # STEP 1: Load agent config from registry (JSON contract)
+        from backend.agents.registry import get_agent_registry
+        registry = get_agent_registry()
+        agent_config = registry.get_agent(agent_id)
+
+        if not agent_config:
+            raise ValueError(f"Agent config not found for: {agent_id}")
+
+        # STEP 2: Retrieve memory context (Mem0 + Qdrant + campaign history)
         logger.info("Retrieving memory context for supervisor decision...")
         memory_context = await _retrieve_supervisor_context(
             tenant_id=tenant_id,
@@ -127,13 +288,34 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
             user_request=user_request
         )
 
-        # STEP 2: LLM-based routing decision with structured output
-        logger.info("Using LLM to analyze request and make routing decision...")
-        decision = await _make_supervisor_decision(
-            user_request=user_request,
+        # STEP 3: Get cost tracking info
+        cost_info = {
+            "daily_cost_usd": 0.0,  # TODO: Get from DB
+            "max_daily_cost_usd": settings.MAX_DAILY_COST_USD,
+            "cost_limit_usd": cost_limit_usd
+        }
+
+        # STEP 4: Create LangChain prompt template and chain
+        prompt_template, chain = create_supervisor_chain(
+            agent_config=agent_config,
             memory_context=memory_context,
-            target_platforms=target_platforms
+            cost_info=cost_info
         )
+
+        # STEP 5: Prepare conversation history
+        messages_history = state.get("messages", [])
+        history = [
+            HumanMessage(content=msg["content"]) if msg["role"] == "user"
+            else SystemMessage(content=msg["content"])
+            for msg in messages_history[-10:]  # Last 10 messages
+        ]
+
+        # STEP 6: Invoke chain with user_input and history
+        logger.info(f"Invoking supervisor chain with user_input: {user_request[:100]}...")
+        decision = await chain.ainvoke({
+            "user_input": user_request,
+            "history": history
+        })
 
         # Log decision
         logger.info(
@@ -142,14 +324,33 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
             f"reasoning={decision.reasoning}"
         )
 
-        # STEP 3: Handle different actions
+        # STEP 7: Process response with unified response processor
+        processed = process_supervisor_response(
+            user_input=user_request,
+            decision=decision,
+            memory_context=memory_context
+        )
+
+        chat_response = processed["chat_response"]
+
+        # Add supervisor message to thread
+        messages_history.append({
+            "role": "supervisor",
+            "content": chat_response,
+            "timestamp": datetime.utcnow().isoformat(),
+            "decision": decision.action
+        })
+
+        # STEP 8: Handle different actions
         if decision.action == "reject":
             logger.warning(f"Request rejected: {decision.rejection_reason}")
             return {
                 **update_workflow_phase(state, "supervisor", "rejected"),
                 "error_message": decision.rejection_reason,
                 "supervisor_decision": decision.model_dump(),
-                "workflow_status": "rejected"
+                "workflow_status": "rejected",
+                "messages": messages_history,
+                "processed_response": processed
             }
 
         if decision.action == "clarify":
@@ -158,10 +359,12 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
                 **update_workflow_phase(state, "supervisor", "needs_clarification"),
                 "clarification_prompt": decision.clarification_needed,
                 "supervisor_decision": decision.model_dump(),
-                "workflow_status": "awaiting_input"
+                "workflow_status": "awaiting_input",
+                "messages": messages_history,
+                "processed_response": processed
             }
 
-        # STEP 4: Check cost limits (for create_content action)
+        # STEP 9: Check cost limits (for create_content action)
         cost_check_passed = await _check_cost_limits(tenant_id, cost_limit_usd)
 
         if not cost_check_passed:
@@ -170,10 +373,12 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
                 **update_workflow_phase(state, "supervisor", "failed"),
                 "error_message": "Daily or per-workflow cost limit exceeded",
                 "cost_check_passed": False,
-                "supervisor_decision": decision.model_dump()
+                "supervisor_decision": decision.model_dump(),
+                "messages": messages_history,
+                "processed_response": processed
             }
 
-        # STEP 5: Route to ContentCreationAgent
+        # STEP 10: Route to ContentCreationAgent
         logger.info(
             f"SupervisorAgent completed: routing to content_creation, "
             f"topic={decision.extracted_topic}, "
@@ -192,16 +397,21 @@ async def supervisor_node(state: VideoWorkflowState) -> Dict[str, Any]:
             "cost_check_passed": True,
             "routing_decision": "content_creation",
             "cost_breakdown": state.get("cost_breakdown", {}),
-            "total_cost_usd": 0.0
+            "total_cost_usd": 0.0,
+            "messages": messages_history,
+            "processed_response": processed
         }
 
     except Exception as e:
         logger.error(f"SupervisorAgent failed: {e}", exc_info=True)
-        return {
-            **update_workflow_phase(state, "supervisor", "failed"),
-            "error_message": str(e),
-            "workflow_status": "failed"
-        }
+
+        # Apply safe_node_execution pattern manually
+        from backend.graph.error_recovery import create_error_state
+        return create_error_state(
+            phase="supervisor",
+            error=e,
+            state=state
+        )
 
 
 # =============================================================================
@@ -283,92 +493,75 @@ async def _retrieve_supervisor_context(
 
 
 # =============================================================================
-# LLM-based Decision Making
+# Helper Functions for Response Generation
 # =============================================================================
 
-async def _make_supervisor_decision(
-    user_request: str,
-    memory_context: Dict[str, Any],
-    target_platforms: List[str]
-) -> SupervisorDecision:
+def _generate_chat_response_from_decision(
+    decision: SupervisorDecision,
+    user_input: str,
+    memory_context: Dict[str, Any]
+) -> str:
     """
-    Use LLM to analyze request and make routing decision.
+    Generate a conversational chat response for the user.
 
-    This replaces simple keyword matching with intelligent LLM analysis.
+    This creates a natural, human-friendly response from the structured
+    decision output.
 
     Args:
-        user_request: User's content request
-        memory_context: Retrieved memory context
-        target_platforms: Target platforms (tiktok, youtube_shorts)
+        decision: Supervisor decision object
+        user_input: Original user request
+        memory_context: Memory context with campaign history
 
     Returns:
-        SupervisorDecision with structured output
+        Conversational response string
     """
-    try:
-        # Initialize LLM with structured output
-        llm = ChatOpenAI(
-            model=settings.OPENAI_MODEL,
-            temperature=0.3,  # Low temperature for consistent routing
-            api_key=settings.OPENAI_API_KEY
+    # Get similar campaigns for context
+    campaigns = memory_context.get("campaign_history", [])
+    has_similar = len(decision.similar_campaigns) > 0
+
+    if decision.action == "reject":
+        return f"I cannot proceed with this request. {decision.rejection_reason}"
+
+    if decision.action == "clarify":
+        return f"{decision.clarification_needed}"
+
+    # create_content action - provide detailed explanation
+    response_parts = []
+
+    # Main confirmation
+    response_parts.append(
+        f"Perfect! I'll create a {decision.content_style} video about **{decision.extracted_topic}**, "
+        f"targeting {decision.target_audience}."
+    )
+
+    # Reference similar campaigns if available
+    if has_similar and campaigns:
+        response_parts.append(
+            f"\n\nThis is similar to your previous campaign from {campaigns[0].get('timestamp', 'recently')}. "
+            f"I'll use those insights to optimize this content."
         )
-        llm_with_structure = llm.with_structured_output(SupervisorDecision)
 
-        # Build memory context string
-        memory_str = _format_memory_context(memory_context)
+    # Explain workflow
+    response_parts.append(
+        f"\n\n**Here's what I'll do:**\n"
+        f"1. Generate a platform-optimized script using Claude AI\n"
+        f"2. Create the video using PiAPI (AI voiceover + visuals + captions)\n"
+        f"3. Publish to the target platform(s)\n"
+    )
 
-        # Build system prompt
-        system_prompt = f"""You are a Supervisor Agent for an AI content creation system.
+    # Cost estimate
+    response_parts.append(f"\n**Estimated cost:** ~$0.30-0.50 for the complete workflow")
 
-Your job is to analyze user requests for video content creation and make intelligent routing decisions.
-
-**Available Actions:**
-1. create_content - Proceed with content creation
-2. clarify - Request more information from user
-3. reject - Reject invalid/inappropriate requests
-
-**Memory Context (Past Campaigns & Conversations):**
-{memory_str}
-
-**Target Platforms:** {', '.join(target_platforms)}
-
-**Your Task:**
-Analyze the user's request and memory context to:
-1. Determine if the request is valid and clear
-2. Extract topic, audience, and content style
-3. Reference similar past campaigns if relevant
-4. Decide which action to take
-
-Be intelligent but concise. Reject only truly problematic requests. Ask for clarification only when necessary."""
-
-        # Build user message
-        user_message = f"""User Request: "{user_request}"
-
-Analyze this request and provide your routing decision."""
-
-        # Invoke LLM
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message)
-        ]
-
-        decision = await llm_with_structure.ainvoke(messages)
-
-        logger.info(f"LLM supervisor decision: {decision.action} (confidence: {decision.confidence:.2f})")
-
-        return decision
-
-    except Exception as e:
-        logger.error(f"LLM decision making failed: {e}", exc_info=True)
-        # Fallback: Default to create_content with low confidence
-        return SupervisorDecision(
-            action="create_content",
-            reasoning="Fallback decision due to LLM error",
-            confidence=0.3,
-            extracted_topic="General",
-            target_audience="general",
-            content_style="informative",
-            similar_campaigns=[]
+    # Confidence indicator
+    if decision.confidence < 0.7:
+        response_parts.append(
+            f"\n\n_Note: I'm {int(decision.confidence * 100)}% confident about this interpretation. "
+            f"Let me know if I misunderstood anything._"
         )
+
+    response_parts.append(f"\n\nRouting to ContentCreationAgent now... 🚀")
+
+    return "".join(response_parts)
 
 
 def _format_memory_context(memory_context: Dict[str, Any]) -> str:
@@ -383,19 +576,10 @@ def _format_memory_context(memory_context: Dict[str, Any]) -> str:
     """
     lines = []
 
-    # Recent campaigns
-    campaigns = memory_context.get("campaign_history", [])
-    if campaigns:
-        lines.append("Recent Campaigns:")
-        for i, campaign in enumerate(campaigns[:3], 1):
-            timestamp = campaign.get("timestamp", "unknown")
-            content = campaign.get("content", "")
-            lines.append(f"  {i}. [{timestamp}] {content}")
-
     # Recent conversation
     recent_msgs = memory_context.get("recent_messages", [])
     if recent_msgs:
-        lines.append("\nRecent Conversation:")
+        lines.append("Recent Conversation:")
         for msg in recent_msgs[-5:]:  # Last 5 messages
             role = msg.get("role", "unknown")
             content = msg.get("content", "")[:100]  # Truncate
@@ -412,6 +596,28 @@ def _format_memory_context(memory_context: Dict[str, Any]) -> str:
 
     if not lines:
         return "(No prior context available)"
+
+    return "\n".join(lines)
+
+
+def _format_campaign_history(campaigns: List[Dict[str, Any]]) -> str:
+    """
+    Format campaign history for LLM consumption.
+
+    Args:
+        campaigns: List of campaign dicts
+
+    Returns:
+        Formatted string for prompt
+    """
+    if not campaigns:
+        return "(No campaign history available)"
+
+    lines = ["Recent Campaigns:"]
+    for i, campaign in enumerate(campaigns[:5], 1):
+        timestamp = campaign.get("timestamp", "unknown")
+        content = campaign.get("content", "")[:150]  # Truncate
+        lines.append(f"  {i}. [{timestamp}] {content}")
 
     return "\n".join(lines)
 
@@ -434,18 +640,69 @@ async def _check_cost_limits(
     Returns:
         True if within limits, False otherwise
     """
-    # TODO: Query database for actual costs
-    # For now, always return True (assume within limits)
+    try:
+        from sqlalchemy import select, func
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from backend.db.models import WorkflowRun
+        from datetime import date, datetime
 
-    # Pseudo-code for future implementation:
-    # daily_cost = await get_daily_cost(tenant_id, date.today())
-    # if daily_cost >= settings.MAX_DAILY_COST_USD:
-    #     return False
-    #
-    # if per_workflow_limit > settings.MAX_PER_WORKFLOW_COST_USD:
-    #     return False
+        # Create async engine
+        engine = create_async_engine(settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"))
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
 
-    return True
+        async with async_session() as session:
+            # Get today's date range
+            today_start = datetime.combine(date.today(), datetime.min.time())
+            today_end = datetime.combine(date.today(), datetime.max.time())
+
+            # Query total cost for tenant today
+            result = await session.execute(
+                select(func.coalesce(func.sum(WorkflowRun.total_cost_usd), 0.0))
+                .where(
+                    WorkflowRun.tenant_id == tenant_id,
+                    WorkflowRun.created_at >= today_start,
+                    WorkflowRun.created_at <= today_end
+                )
+            )
+            daily_cost = result.scalar() or 0.0
+
+            # Check daily limit
+            if daily_cost >= settings.MAX_DAILY_COST_USD:
+                logger.warning(
+                    f"Daily cost limit exceeded for tenant {tenant_id}: "
+                    f"${daily_cost:.2f} / ${settings.MAX_DAILY_COST_USD:.2f}"
+                )
+                return False
+
+            # Check per-workflow limit
+            if per_workflow_limit > settings.MAX_PER_WORKFLOW_COST_USD:
+                logger.warning(
+                    f"Per-workflow limit too high: ${per_workflow_limit:.2f} > "
+                    f"${settings.MAX_PER_WORKFLOW_COST_USD:.2f}"
+                )
+                return False
+
+            # Check if this workflow would exceed daily limit
+            if (daily_cost + per_workflow_limit) > settings.MAX_DAILY_COST_USD:
+                logger.warning(
+                    f"Workflow would exceed daily limit: "
+                    f"${daily_cost:.2f} + ${per_workflow_limit:.2f} > "
+                    f"${settings.MAX_DAILY_COST_USD:.2f}"
+                )
+                return False
+
+            logger.info(
+                f"Cost check passed for tenant {tenant_id}: "
+                f"Daily: ${daily_cost:.2f}/{settings.MAX_DAILY_COST_USD:.2f}, "
+                f"Workflow: ${per_workflow_limit:.2f}/{settings.MAX_PER_WORKFLOW_COST_USD:.2f}"
+            )
+            return True
+
+    except Exception as e:
+        logger.error(f"Error checking cost limits: {e}", exc_info=True)
+        # On error, allow workflow (fail-open for availability)
+        logger.warning("Cost check failed, allowing workflow to proceed")
+        return True
 
 
 async def aggregate_results_node(state: VideoWorkflowState) -> Dict[str, Any]:
