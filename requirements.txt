@@ -1,21 +1,18 @@
 # Core Orchestration (REQUIRED)
-langgraph==0.2.27
+langgraph==0.2.70  # Upgraded for langgraph-checkpoint-postgres v2.x compatibility
+langgraph-checkpoint-postgres==2.0.10  # PostgreSQL checkpointer for LangGraph
 langchain==0.3.23
 langchain-anthropic==0.3.6
 langchain-community==0.3.14
 langchain-core>=0.3.51  # Compatible with langchain 0.3.23
 
 # Memory & Database
-# mem0ai==0.1.17  # Temporarily disabled - incompatible with langchain 0.3.x
+mem0ai>=0.1.32  # ✅ ENABLED: Mem0 for semantic memory (upgraded for langchain 0.3.x compatibility)
 asyncpg==0.30.0
 psycopg2-binary==2.9.10
 sqlalchemy[asyncio]==2.0.36
 alembic==1.14.0
-
-# Qdrant Vector Store (for conversation history)
-qdrant-client==1.12.1
-langchain-qdrant==0.2.0
-langchain-openai==0.2.14  # For embeddings + GPT models
+langchain-openai==0.2.14  # For embeddings + GPT models (required by Mem0)
 
 # FastAPI Backend
 fastapi==0.115.5
@@ -28,7 +25,7 @@ websockets==14.1
 aiohttp==3.11.10
 
 # Model Context Protocol (MCP) for PiAPI integration
-mcp==1.1.2
+mcp>=1.9.0,<2.0.0
 sse-starlette==2.2.1  # Server-Sent Events for MCP communication
 
 # AI Video Generation (PRIMARY)

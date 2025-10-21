@@ -4,22 +4,27 @@ PiAPI MCP Client
 Connects to PiAPI MCP Server via Server-Sent Events (SSE) to access advanced
 video generation tools through the Model Context Protocol.
 
-Pattern adopted from mcp-voice-agent example's MCPClientWrapper.
+This implementation uses the official MCP SDK to establish a proper connection
+and dynamically discover tools from the server.
 
 Architecture:
-- Connects to local PiAPI MCP server (Node.js/TypeScript)
-- Retrieves available tools via MCP protocol
+- Connects to local PiAPI MCP server (Node.js/TypeScript) via SSE
+- Uses MCP SDK for protocol-compliant communication
+- Dynamically discovers available tools via MCP list_tools
 - Converts MCP tools to LangChain-compatible tools
 - Caches client connection for reuse
 """
 
 from typing import List, Optional, Tuple, Any, Dict
 import logging
-import httpx
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+import json
+import asyncio
+from contextlib import asynccontextmanager
 
-from langchain_core.tools import Tool
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from langchain_core.tools import Tool, StructuredTool
+from pydantic import BaseModel, Field, create_model
 
 from backend.config import get_settings
 
@@ -33,64 +38,143 @@ _piapi_mcp_client: Optional['PiAPIMCPClient'] = None
 
 class PiAPIMCPClient:
     """
-    PiAPI MCP Client - Connects to PiAPI MCP server.
+    PiAPI MCP Client - Connects to PiAPI MCP server via MCP protocol.
 
-    Manages connection lifecycle and tool retrieval from the MCP server.
+    Manages connection lifecycle and tool retrieval from the MCP server
+    using the official MCP SDK.
 
     Usage:
-        client = PiAPIMCPClient()
-        await client.connect()
-        tools = await client.get_tools()
-        await client.close()
+        async with PiAPIMCPClient() as client:
+            tools = await client.get_tools()
     """
 
     def __init__(
         self,
-        server_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        server_url: Optional[str] = None
     ):
         """
         Initialize PiAPI MCP client.
 
         Args:
             server_url: MCP server URL (defaults to config)
-            api_key: PiAPI API key (defaults to config)
+
+        Note:
+            No API key needed here - the MCP server handles PiAPI authentication
+            using credentials from PiAPI_MCP/piapi-mcp-server/.env.local
         """
         self.server_url = server_url or settings.PIAPI_MCP_SERVER_URL
-        self.api_key = api_key or settings.PIAPI_API_KEY
         self.session: Optional[ClientSession] = None
+        self.read_stream = None
+        self.write_stream = None
+        self._connection_task = None  # Background task keeping SSE alive
+        self._connection_error = None  # Store any connection errors
         self.tools: List[Tool] = []
         self._connected = False
+        self._connection_ready = asyncio.Event()  # Signal when connection is ready
 
-    async def connect(self) -> None:
+    async def __aenter__(self):
+        """Enter async context manager - establishes connection."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context manager - closes connection."""
+        await self.close()
+        return False
+
+    async def _maintain_connection(self) -> None:
         """
-        Connect to PiAPI MCP server.
+        Background task that maintains the SSE connection using proper async with.
 
-        Establishes SSE connection and initializes client session.
+        This keeps the SSE context manager alive throughout the client's lifetime,
+        preventing "cancel scope in different task" errors.
         """
         try:
             logger.info(f"Connecting to PiAPI MCP server: {self.server_url}")
 
-            # For SSE-based MCP servers, we use httpx client
-            # Note: The actual MCP connection depends on server implementation
-            # This is a simplified version - adjust based on actual PiAPI MCP server
+            # Use async with to properly manage SSE lifecycle
+            async with sse_client(
+                url=self.server_url,
+                timeout=10.0,
+                sse_read_timeout=300.0
+            ) as (read_stream, write_stream):
+                # Store streams
+                self.read_stream = read_stream
+                self.write_stream = write_stream
 
-            # Test connection
-            async with httpx.AsyncClient() as client:
-                response = await client.get(self.server_url, timeout=5.0)
-                if response.status_code != 200:
-                    raise ConnectionError(f"MCP server returned status {response.status_code}")
+                # Initialize MCP session
+                self.session = ClientSession(read_stream, write_stream)
 
-            logger.info("PiAPI MCP server connection established")
-            self._connected = True
+                # Initialize the MCP protocol handshake
+                logger.info("Initiating MCP protocol handshake...")
+                try:
+                    init_result = await asyncio.wait_for(
+                        self.session.initialize(),
+                        timeout=5.0
+                    )
+                    logger.info(f"✅ MCP handshake complete - Protocol: {init_result.protocol_version}")
+                    logger.info(f"Server: {init_result.server_info}")
+                except asyncio.TimeoutError:
+                    logger.warning("MCP initialize() timed out - proceeding anyway")
+                except Exception as e:
+                    logger.warning(f"MCP initialize() failed: {e} - proceeding anyway")
 
+                # Mark as connected and signal readiness
+                self._connected = True
+                self._connection_ready.set()
+                logger.info("MCP client ready")
+
+                # Keep the connection alive until cancelled
+                logger.info("MCP connection active, waiting for close signal...")
+                await asyncio.Event().wait()  # Wait forever (until task cancelled)
+
+        except asyncio.CancelledError:
+            logger.info("MCP connection task cancelled gracefully")
+            raise
         except Exception as e:
-            logger.error(f"Failed to connect to PiAPI MCP server: {e}")
-            raise ConnectionError(f"PiAPI MCP connection failed: {e}")
+            logger.error(f"SSE connection failed: {e}")
+            logger.exception("Full traceback:")
+            self._connection_error = e
+            self._connection_ready.set()  # Unblock any waiters
+            raise
+        finally:
+            self._connected = False
+            logger.info("SSE connection closed")
+
+    async def connect(self) -> None:
+        """
+        Connect to PiAPI MCP server by starting background SSE task.
+
+        Waits for connection to be ready before returning.
+        """
+        if self._connection_task and not self._connection_task.done():
+            logger.warning("Connection task already running")
+            return
+
+        # Reset state
+        self._connection_ready.clear()
+        self._connection_error = None
+
+        # Start background task
+        self._connection_task = asyncio.create_task(self._maintain_connection())
+
+        # Wait for connection to be ready (with timeout)
+        try:
+            await asyncio.wait_for(self._connection_ready.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            self._connection_task.cancel()
+            raise ConnectionError("MCP connection timeout - server did not respond within 10s")
+
+        # Check if connection failed
+        if self._connection_error:
+            raise ConnectionError(f"MCP connection failed: {self._connection_error}")
 
     async def get_tools(self) -> List[Tool]:
         """
-        Retrieve tools from PiAPI MCP server.
+        Retrieve tools from PiAPI MCP server via MCP protocol.
+
+        Discovers available tools dynamically using session.list_tools()
+        and converts them to LangChain-compatible Tool objects.
 
         Returns:
             List of LangChain-compatible tools
@@ -98,194 +182,268 @@ class PiAPIMCPClient:
         Raises:
             RuntimeError: If not connected
         """
-        if not self._connected:
+        if not self._connected or not self.session:
             raise RuntimeError("Not connected. Call connect() first.")
 
         try:
-            logger.info("Retrieving tools from PiAPI MCP server...")
+            logger.info("Discovering tools from PiAPI MCP server via MCP protocol...")
 
-            # Mock tools for now - replace with actual MCP tool discovery
-            # In production, this would query the MCP server's tool list
-            self.tools = await self._discover_mcp_tools()
+            # Use MCP SDK to list available tools
+            tools_response = await self.session.list_tools()
 
-            logger.info(f"Retrieved {len(self.tools)} tools from PiAPI MCP")
+            logger.info(f"MCP server reported {len(tools_response.tools)} tools")
+
+            # Convert MCP tools to LangChain tools
+            self.tools = []
+            for mcp_tool in tools_response.tools:
+                try:
+                    langchain_tool = await self._convert_mcp_tool_to_langchain(mcp_tool)
+                    self.tools.append(langchain_tool)
+                    logger.debug(f"Converted MCP tool: {mcp_tool.name}")
+                except Exception as e:
+                    logger.error(f"Failed to convert tool {mcp_tool.name}: {e}")
+                    continue
+
+            logger.info(f"Successfully converted {len(self.tools)} MCP tools to LangChain format")
 
             return self.tools
 
         except Exception as e:
             logger.error(f"Failed to retrieve MCP tools: {e}")
+            logger.exception("Full traceback:")
             return []
 
-    async def _discover_mcp_tools(self) -> List[Tool]:
+    async def _convert_mcp_tool_to_langchain(self, mcp_tool) -> Tool:
         """
-        Discover available tools from PiAPI MCP server.
+        Convert an MCP tool to a LangChain Tool.
 
-        This is a placeholder implementation. In production, this would:
-        1. Query MCP server's tool list endpoint
-        2. Parse tool schemas
-        3. Convert to LangChain Tool objects
+        Args:
+            mcp_tool: MCP tool definition from list_tools response
 
         Returns:
-            List of discovered tools
+            LangChain Tool object
         """
-        # Placeholder: Define expected PiAPI tools based on MCP server capabilities
-        # These should match the tools exposed by PiAPI_MCP/piapi-mcp-server
+        tool_name = mcp_tool.name
+        tool_description = mcp_tool.description or f"MCP tool: {tool_name}"
 
-        tools = []
+        # Extract input schema from MCP tool
+        input_schema = mcp_tool.inputSchema if hasattr(mcp_tool, 'inputSchema') else {}
 
-        # Tool 1: Generate Video (Hunyuan, Kling, Luma, etc.)
-        async def generate_video(
-            prompt: str,
-            model: str = "hunyuan",
-            duration: int = 5,
-            aspect_ratio: str = "9:16"
-        ) -> Dict[str, Any]:
+        # Create async function that calls the MCP tool
+        async def invoke_mcp_tool(**kwargs) -> str:
             """
-            Generate video from text prompt using PiAPI models.
+            Invoke MCP tool via session.call_tool().
 
             Args:
-                prompt: Text description of video
-                model: Video model (hunyuan, kling, luma, minimax, runway)
-                duration: Video duration in seconds
-                aspect_ratio: Aspect ratio (9:16 for TikTok/Shorts, 16:9 for landscape)
+                **kwargs: Tool arguments
 
             Returns:
-                Video generation result with URL
+                JSON string with tool result
             """
-            # Placeholder - actual implementation would call PiAPI MCP server
-            logger.info(f"Generating video via MCP: model={model}, prompt={prompt[:50]}")
-            return {
-                "status": "pending",
-                "message": "MCP video generation not yet implemented",
-                "model": model,
-                "prompt": prompt
-            }
+            try:
+                logger.info(f"Invoking MCP tool: {tool_name} with args: {kwargs}")
 
-        video_tool = Tool(
-            name="piapi_generate_video",
-            description="Generate AI video from text prompt using state-of-the-art models (Hunyuan, Kling, Luma, Minimax, Runway). Supports various aspect ratios and durations.",
-            func=lambda **kwargs: generate_video(**kwargs),
-            coroutine=generate_video
+                # Call tool via MCP protocol
+                result = await self.session.call_tool(
+                    name=tool_name,
+                    arguments=kwargs
+                )
+
+                logger.info(f"MCP tool {tool_name} completed successfully")
+
+                # Parse result
+                # MCP returns CallToolResult with content array
+                if hasattr(result, 'content') and result.content:
+                    # Extract text content from first item
+                    content_item = result.content[0]
+                    if hasattr(content_item, 'text'):
+                        return content_item.text
+                    elif hasattr(content_item, 'data'):
+                        return json.dumps(content_item.data)
+                    else:
+                        return str(content_item)
+
+                return json.dumps({"status": "success", "result": str(result)})
+
+            except Exception as e:
+                logger.error(f"MCP tool {tool_name} failed: {e}")
+                logger.exception("Full traceback:")
+                return json.dumps({
+                    "status": "error",
+                    "error": str(e),
+                    "tool": tool_name
+                })
+
+        # Create sync wrapper for LangChain compatibility
+        def invoke_mcp_tool_sync(**kwargs) -> str:
+            """Sync wrapper that runs async function."""
+            return asyncio.run(invoke_mcp_tool(**kwargs))
+
+        # Create Pydantic model for input schema if available
+        if input_schema and isinstance(input_schema, dict) and input_schema.get('properties'):
+            try:
+                # Build Pydantic model from JSON schema
+                fields = {}
+                properties = input_schema.get('properties', {})
+                required_fields = input_schema.get('required', [])
+
+                for field_name, field_spec in properties.items():
+                    field_type = self._json_schema_type_to_python(field_spec)
+                    field_description = field_spec.get('description', '')
+                    is_required = field_name in required_fields
+
+                    if is_required:
+                        fields[field_name] = (field_type, Field(description=field_description))
+                    else:
+                        fields[field_name] = (Optional[field_type], Field(default=None, description=field_description))
+
+                # Create dynamic Pydantic model
+                input_model = create_model(
+                    f"{tool_name}_input",
+                    **fields
+                )
+
+                # Use StructuredTool with schema
+                return StructuredTool(
+                    name=tool_name,
+                    description=tool_description,
+                    func=invoke_mcp_tool_sync,
+                    coroutine=invoke_mcp_tool,
+                    args_schema=input_model
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed to create structured schema for {tool_name}: {e}")
+                # Fall back to basic Tool
+
+        # Fallback: Create basic Tool without structured input
+        return Tool(
+            name=tool_name,
+            description=tool_description,
+            func=invoke_mcp_tool_sync,
+            coroutine=invoke_mcp_tool
         )
-        tools.append(video_tool)
 
-        # Tool 2: Generate Image
-        async def generate_image(
-            prompt: str,
-            model: str = "flux",
-            size: str = "1024x1024"
-        ) -> Dict[str, Any]:
-            """
-            Generate image from text prompt.
+    def _json_schema_type_to_python(self, schema: Dict[str, Any]) -> type:
+        """
+        Convert JSON Schema type to Python type.
 
-            Args:
-                prompt: Image description
-                model: Image model (flux, midjourney, stable-diffusion)
-                size: Image size
+        Args:
+            schema: JSON schema field definition
 
-            Returns:
-                Image generation result
-            """
-            logger.info(f"Generating image via MCP: model={model}, prompt={prompt[:50]}")
-            return {
-                "status": "pending",
-                "message": "MCP image generation not yet implemented"
-            }
+        Returns:
+            Python type
+        """
+        schema_type = schema.get('type', 'string')
 
-        image_tool = Tool(
-            name="piapi_generate_image",
-            description="Generate AI image from text prompt using Flux, Midjourney, or Stable Diffusion",
-            func=lambda **kwargs: generate_image(**kwargs),
-            coroutine=generate_image
-        )
-        tools.append(image_tool)
+        type_mapping = {
+            'string': str,
+            'number': float,
+            'integer': int,
+            'boolean': bool,
+            'array': list,
+            'object': dict
+        }
 
-        # Tool 3: Text-to-Speech (if supported)
-        async def text_to_speech(
-            text: str,
-            voice: str = "default",
-            language: str = "en"
-        ) -> Dict[str, Any]:
-            """
-            Convert text to speech audio.
+        return type_mapping.get(schema_type, str)
 
-            Args:
-                text: Text to convert
-                voice: Voice preset
-                language: Language code
-
-            Returns:
-                Audio generation result
-            """
-            logger.info(f"Generating TTS via MCP: text={text[:50]}")
-            return {
-                "status": "pending",
-                "message": "MCP TTS not yet implemented"
-            }
-
-        tts_tool = Tool(
-            name="piapi_text_to_speech",
-            description="Convert text to speech audio for video voiceovers",
-            func=lambda **kwargs: text_to_speech(**kwargs),
-            coroutine=text_to_speech
-        )
-        tools.append(tts_tool)
-
-        logger.info(f"Discovered {len(tools)} placeholder tools (replace with actual MCP discovery)")
-
-        return tools
+    async def _cleanup_connection(self) -> None:
+        """Cleanup SSE connection resources by cancelling background task."""
+        try:
+            if self._connection_task and not self._connection_task.done():
+                logger.debug("Cancelling MCP connection background task")
+                self._connection_task.cancel()
+                try:
+                    await self._connection_task
+                except asyncio.CancelledError:
+                    pass  # Expected
+                logger.debug("MCP connection task stopped")
+        except Exception as e:
+            logger.warning(f"Error during connection cleanup: {e}")
 
     async def close(self) -> None:
         """Close MCP client connection."""
-        if self.session:
-            # Close session if needed
-            pass
-        self._connected = False
-        logger.info("PiAPI MCP client connection closed")
+        try:
+            if self.session:
+                # No explicit close needed for ClientSession
+                self.session = None
+
+            # Exit SSE context manager properly
+            await self._cleanup_connection()
+
+            self.read_stream = None
+            self.write_stream = None
+            self._connected = False
+
+            logger.info("PiAPI MCP client connection closed")
+
+        except Exception as e:
+            logger.error(f"Error closing MCP client: {e}")
 
 
 # =============================================================================
 # Convenience Functions
 # =============================================================================
 
-async def get_piapi_mcp_client() -> Tuple[PiAPIMCPClient, List[Tool]]:
+async def get_piapi_mcp_client() -> Tuple[Optional[PiAPIMCPClient], List[Tool]]:
     """
-    Get or create PiAPI MCP client singleton.
+    Get or create PiAPI MCP client singleton (lazy initialization).
 
     Returns:
         Tuple of (client, tools)
 
     Usage:
         client, tools = await get_piapi_mcp_client()
+
+    Note:
+        - Initializes on first call (lazy loading)
+        - Safe to call multiple times - returns cached client
+        - Fails gracefully with timeout protection
+        - Call close_piapi_mcp_client() during shutdown
     """
     global _piapi_mcp_client
 
     # Check if MCP is enabled
     if not settings.PIAPI_MCP_ENABLED:
-        logger.warning("PiAPI MCP is disabled in config. Returning empty tools.")
+        logger.warning("PiAPI MCP is disabled in config")
         return None, []
 
-    # Return cached client if available
+    # Return cached client if available and connected
     if _piapi_mcp_client is not None and _piapi_mcp_client._connected:
-        logger.info("Reusing existing PiAPI MCP client")
+        logger.debug("Reusing existing PiAPI MCP client")
         return _piapi_mcp_client, _piapi_mcp_client.tools
 
-    # Create new client
+    # Lazy initialization - first call only
+    logger.info("🔄 Initializing PiAPI MCP client (lazy load)...")
+
     try:
         client = PiAPIMCPClient()
-        await client.connect()
+
+        # Connect with timeout to prevent blocking
+        await asyncio.wait_for(client.connect(), timeout=15.0)
         tools = await client.get_tools()
 
-        # Cache for reuse
+        # Cache for reuse - client stays open
         _piapi_mcp_client = client
 
-        logger.info(f"PiAPI MCP client initialized with {len(tools)} tools")
+        logger.info(f"✅ PiAPI MCP client initialized successfully with {len(tools)} tools")
 
         return client, tools
 
+    except asyncio.TimeoutError:
+        logger.warning("⚠️ MCP initialization timed out after 15s - continuing without MCP tools")
+        logger.info("Application will use fallback video generation tools")
+        return None, []
+
+    except ConnectionError as e:
+        logger.warning(f"⚠️ MCP connection failed: {e}")
+        logger.info("Application will use fallback video generation tools")
+        return None, []
+
     except Exception as e:
-        logger.error(f"Failed to initialize PiAPI MCP client: {e}")
-        logger.warning("Continuing without MCP tools")
+        logger.error(f"❌ Unexpected error initializing MCP client: {e}")
+        logger.exception("Full traceback:")
+        logger.info("Application will use fallback video generation tools")
         return None, []
 
 
