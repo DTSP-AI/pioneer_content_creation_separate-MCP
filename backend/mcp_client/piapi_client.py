@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from mcp.types import Implementation
 from langchain_core.tools import Tool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 
@@ -102,8 +103,16 @@ class PiAPIMCPClient:
                 self.read_stream = read_stream
                 self.write_stream = write_stream
 
-                # Initialize MCP session
-                self.session = ClientSession(read_stream, write_stream)
+                # Initialize MCP session with proper client info
+                client_info = Implementation(
+                    name="content-creation-agent",
+                    version="1.0.0"
+                )
+                self.session = ClientSession(
+                    read_stream,
+                    write_stream,
+                    client_info=client_info
+                )
 
                 # Initialize the MCP protocol handshake
                 logger.info("Initiating MCP protocol handshake...")
