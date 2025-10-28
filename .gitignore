@@ -90,6 +90,8 @@ htmlcov/
 # Streamlit
 .streamlit/
 
-# Documentation (ignore all .md except README.md)
-*.md
-!README.md
+# Workspace files
+*.code-workspace
+
+# Temporary documentation
+Doc_Offload/
