@@ -95,3 +95,6 @@ htmlcov/
 
 # Temporary documentation
 Doc_Offload/
+
+# Documentation files (all .md files)
+*.md
