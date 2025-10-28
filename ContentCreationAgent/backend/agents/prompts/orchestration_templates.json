@@ -1,0 +1,41 @@
+{
+  "tool_selection_prompt": {
+    "description": "Prompt for intelligent tool selection based on context",
+    "template": "You are selecting the optimal tool for content creation. Analyze the following:\n\n**User Request:** {user_request}\n\n**Target Platform:** {platform}\n\n**Content Type:** {content_type}\n\n**Priority:** {priority} (quality/balanced/speed)\n\n**Available Tools:**\n{available_tools}\n\n**Platform Requirements:**\n{platform_requirements}\n\n**User Preferences (from memory):**\n{user_preferences}\n\nBased on this context, select the best tool and explain your reasoning. Consider:\n1. Platform-specific requirements (aspect ratio, duration, style)\n2. Quality vs speed tradeoff based on priority\n3. User's past preferences and successful content\n4. Cost efficiency\n5. Tool capabilities and strengths\n\nProvide your selection in this format:\n- Selected Tool: [tool_name]\n- Reasoning: [why this tool is optimal]\n- Fallback Tools: [alternatives if primary fails]\n- Estimated Time: [generation time]\n- Expected Quality: [1-10 score]"
+  },
+
+  "workflow_planning_prompt": {
+    "description": "Prompt for planning the complete workflow stages",
+    "template": "You are planning a content creation workflow. Analyze the request:\n\n**User Request:** {user_request}\n\n**Parsed Intent:**\n- Topic: {topic}\n- Platforms: {platforms}\n- Content Type: {content_type}\n- Urgency: {urgency}\n\n**Recommended Tool Chain:**\n{tool_chain}\n\n**Conversation Context:**\n{conversation_history}\n\nCreate a step-by-step execution plan:\n\n1. **Strategy Phase:**\n   - What research is needed?\n   - What trending topics align with the request?\n\n2. **Creation Phase:**\n   - Which tools will be used in sequence?\n   - What parameters for each tool?\n   - Any conditional logic?\n\n3. **Refinement Phase:**\n   - Platform-specific optimizations needed?\n   - Caption/hashtag generation?\n\n4. **Delivery Phase:**\n   - Upload platforms\n   - Tracking metrics\n\nProvide clear, actionable steps with estimated time for each phase."
+  },
+
+  "quality_vs_speed_analysis": {
+    "description": "Analyze quality vs speed tradeoffs",
+    "template": "Analyze the quality vs speed tradeoff for this request:\n\n**User Request:** {user_request}\n\n**Detected Urgency Keywords:** {urgency_keywords}\n\n**Target Platform:** {platform}\n\n**Available Models:**\n{model_comparison}\n\n**Question:** Should we prioritize QUALITY or SPEED?\n\nConsider:\n1. Does the request contain urgency indicators? (\"quickly\", \"ASAP\", \"urgent\")\n2. Is this for a time-sensitive trend?\n3. What is the platform's typical content quality expectation?\n4. Has the user expressed quality preferences before?\n\nProvide:\n- Recommended Priority: [QUALITY/BALANCED/SPEED]\n- Reasoning: [explanation]\n- Suggested Model: [model_name]\n- Trade-offs: [what we're optimizing for vs sacrificing]"
+  },
+
+  "fallback_strategy_prompt": {
+    "description": "When primary tool fails, determine fallback action",
+    "template": "Primary tool has failed. Determine fallback strategy:\n\n**Failed Tool:** {failed_tool}\n\n**Error:** {error_message}\n\n**Original Request:** {user_request}\n\n**Available Fallback Tools:**\n{fallback_tools}\n\n**Workflow Progress:**\n- Completed Steps: {completed_steps}\n- Current Step: {current_step}\n- Remaining Steps: {remaining_steps}\n\nDetermine the best course of action:\n\nOption 1: Retry with different parameters\nOption 2: Use alternative tool from fallback chain\nOption 3: Modify workflow to skip this step\nOption 4: Notify user and request guidance\n\nProvide:\n- Recommended Action: [option number]\n- Alternative Tool (if applicable): [tool_name]\n- User Notification: [what to tell the user]\n- Estimated Impact: [how this affects final output]"
+  },
+
+  "platform_optimization_prompt": {
+    "description": "Optimize content for specific platform",
+    "template": "Optimize this content for the target platform:\n\n**Platform:** {platform}\n\n**Platform Requirements:**\n{platform_requirements}\n\n**Generated Content:**\n- Video URL: {video_url}\n- Duration: {duration}\n- Aspect Ratio: {aspect_ratio}\n- Current Captions: {captions}\n\n**Platform Best Practices:**\n{best_practices}\n\nProvide optimization recommendations:\n\n1. **Technical Adjustments:**\n   - Does aspect ratio match platform requirements?\n   - Is duration optimal for platform?\n   - Any quality/resolution adjustments needed?\n\n2. **Content Enhancements:**\n   - Caption optimization (length, style, emojis)\n   - Hashtag recommendations (trending + relevant)\n   - Thumbnail/cover frame selection\n\n3. **Metadata:**\n   - Suggested title\n   - Description\n   - Tags/keywords\n\n4. **Posting Strategy:**\n   - Best time to post\n   - Expected engagement\n   - Cross-promotion opportunities"
+  },
+
+  "cost_optimization_prompt": {
+    "description": "Optimize for cost while maintaining quality",
+    "template": "Optimize tool selection for cost efficiency:\n\n**User Request:** {user_request}\n\n**Budget Constraints:** {budget}\n\n**Model Costs:**\n{model_costs}\n\n**Quality Requirements:** {quality_threshold}\n\n**Volume:** {number_of_videos} videos\n\nProvide cost-optimized strategy:\n\n1. **Primary Model Selection:**\n   - Recommended: [model_name]\n   - Cost per video: [amount]\n   - Quality score: [score]\n   - Justification: [why this is the best cost/quality balance]\n\n2. **Bulk Strategies:**\n   - Can we batch process?\n   - Volume discounts available?\n   - Alternative workflows to reduce costs?\n\n3. **Total Cost Analysis:**\n   - Estimated total: [amount]\n   - Cost breakdown by stage\n   - Potential savings: [optimizations]"
+  },
+
+  "context_extraction_prompt": {
+    "description": "Extract key context from conversation for tool selection",
+    "template": "Extract actionable context from this conversation:\n\n**Recent Messages:**\n{conversation_history}\n\n**User Profile (from memory):**\n{user_profile}\n\n**Past Successful Content:**\n{past_successes}\n\nExtract:\n\n1. **Content Preferences:**\n   - Preferred video styles: [list]\n   - Preferred platforms: [list]\n   - Quality vs speed preference: [quality/balanced/speed]\n\n2. **Topic Patterns:**\n   - Recurring themes: [list]\n   - Industry/niche: [category]\n   - Target audience: [description]\n\n3. **Success Metrics:**\n   - What has performed well before?\n   - What tools/models produced best results?\n   - What strategies to replicate?\n\n4. **Current Intent:**\n   - Immediate goal: [description]\n   - Timeline: [urgent/normal/flexible]\n   - Expected outcome: [what user wants to achieve]\n\nUse this context to inform tool selection and workflow planning."
+  },
+
+  "multi_platform_strategy": {
+    "description": "Strategy for creating content for multiple platforms simultaneously",
+    "template": "Create multi-platform content strategy:\n\n**User Request:** {user_request}\n\n**Target Platforms:** {platforms}\n\n**Platform Requirements:**\n{platform_requirements}\n\n**Approach Options:**\n\n**Option A: Single Master Video + Platform Variations**\n- Create one high-quality master video\n- Generate platform-specific versions (crop, resize, optimize)\n- Pros: Consistent branding, efficient\n- Cons: May not be perfectly optimized for each platform\n\n**Option B: Platform-Native Content**\n- Create separate videos optimized for each platform\n- Different aspect ratios, durations, styles\n- Pros: Maximum engagement per platform\n- Cons: Higher cost and time\n\n**Option C: Hybrid Approach**\n- Create 2-3 base versions (vertical, horizontal, square)\n- Customize captions, thumbnails per platform\n- Pros: Balance of optimization and efficiency\n- Cons: Moderate complexity\n\nRecommend the best approach considering:\n- User's budget/time constraints\n- Platform diversity (how different are requirements?)\n- Content type and topic\n- Expected ROI per platform\n\nProvide:\n- Recommended Approach: [A/B/C]\n- Tool Sequence: [step-by-step]\n- Estimated Cost: [breakdown]\n- Estimated Time: [timeline]\n- Expected Reach: [per platform]"
+  }
+}

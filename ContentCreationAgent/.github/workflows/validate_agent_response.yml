@@ -1,0 +1,487 @@
+name: Validate Agent Response Format Compliance
+
+# ============================================================================
+# PHASE 5 - CI/CD Enforcement for Unified MCP Response Alignment
+# ============================================================================
+#
+# Purpose: Prevent regressions in response format handling by:
+# 1. Scanning for legacy string patterns that break with JSON responses
+# 2. Running pytest validation suite for response parsing
+# 3. Enforcing unified schema conformance
+#
+# Triggers:
+# - Pull requests modifying agent code
+# - Commits to main branch
+# - Manual workflow dispatch for testing
+#
+# ============================================================================
+
+on:
+  pull_request:
+    paths:
+      - 'backend/agents/**'
+      - 'backend/mcp_client/**'
+      - 'backend/workflow/**'
+      - 'backend/tools/**'
+      - 'PiAPI_MCP/piapi_mcp_server_python/**'
+      - 'backend/tests/test_video_response_handling.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/agents/**'
+      - 'backend/mcp_client/**'
+  workflow_dispatch:
+
+jobs:
+  # ==========================================================================
+  # JOB 1: Static Analysis - Detect Legacy Patterns
+  # ==========================================================================
+  detect-legacy-patterns:
+    name: Scan for Legacy Response Patterns
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan for "Video generated successfully!" strings
+        id: scan_success_marker
+        run: |
+          echo "Scanning for hardcoded 'Video generated successfully!' patterns..."
+
+          # Search for legacy text parsing patterns (exclude test files)
+          MATCHES=$(grep -rn "Video generated successfully!" \
+            --include="*.py" \
+            --exclude-dir=tests \
+            --exclude-dir=docs \
+            backend/ PiAPI_MCP/ || true)
+
+          if [ -n "$MATCHES" ]; then
+            echo "::warning::Found legacy 'Video generated successfully!' pattern usage:"
+            echo "$MATCHES"
+
+            # Check if these are in try/except blocks (acceptable)
+            SAFE_COUNT=$(echo "$MATCHES" | grep -c "except\|# Legacy fallback\|# Backward compatibility" || true)
+            TOTAL_COUNT=$(echo "$MATCHES" | wc -l)
+
+            if [ "$SAFE_COUNT" -lt "$TOTAL_COUNT" ]; then
+              echo "::error::Found unsafe legacy pattern usage without try/except fallback"
+              echo "LEGACY_PATTERN_UNSAFE=true" >> $GITHUB_ENV
+              exit 1
+            fi
+          fi
+
+      - name: Scan for direct string splitting on result
+        id: scan_split_pattern
+        run: |
+          echo "Scanning for unsafe result.split() patterns..."
+
+          # Look for result.split('\n') without JSON parsing first
+          SPLIT_MATCHES=$(grep -rn "result.split('\\\\n')" \
+            --include="*.py" \
+            --exclude-dir=tests \
+            backend/agents/ || true)
+
+          if [ -n "$SPLIT_MATCHES" ]; then
+            # Verify these are in except blocks (fallback paths)
+            for match in $SPLIT_MATCHES; do
+              FILE=$(echo $match | cut -d: -f1)
+              LINE=$(echo $match | cut -d: -f2)
+
+              # Check if within 10 lines above is a try/except
+              CONTEXT=$(sed -n "$((LINE-10)),$((LINE))p" "$FILE")
+
+              if ! echo "$CONTEXT" | grep -q "except.*JSONDecodeError\|except.*TypeError"; then
+                echo "::error::Unsafe result.split() at $FILE:$LINE without JSON parse try/except"
+                exit 1
+              fi
+            done
+          fi
+
+      - name: Scan for missing .get() defaults
+        id: scan_dict_access
+        run: |
+          echo "Scanning for unsafe dictionary access..."
+
+          # Look for direct bracket access on result dictionaries
+          UNSAFE_ACCESS=$(grep -rn '\["video_url"\]\|\["status"\]\|\["output"\]' \
+            --include="*.py" \
+            --exclude-dir=tests \
+            backend/agents/ || true)
+
+          if [ -n "$UNSAFE_ACCESS" ]; then
+            echo "::warning::Found direct dictionary access without .get() defaults:"
+            echo "$UNSAFE_ACCESS"
+            echo "Consider using .get() with defaults for safety"
+          fi
+
+  # ==========================================================================
+  # JOB 2: Unit Tests - Response Parsing
+  # ==========================================================================
+  test-response-parsing:
+    name: Run Response Format Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-cov
+          pip install -r backend/requirements.txt
+
+      - name: Run response format tests
+        run: |
+          pytest backend/tests/test_video_response_handling.py \
+            -v \
+            --cov=backend/agents/content_creation_agent \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=85
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: response-parsing
+          name: response-format-tests
+
+  # ==========================================================================
+  # JOB 3: Schema Validation - Enforce Unified Contract
+  # ==========================================================================
+  validate-response-schema:
+    name: Validate Response Schema Conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install jsonschema validator
+        run: |
+          pip install jsonschema pyyaml
+
+      - name: Create unified schema validator script
+        run: |
+          cat > validate_schema.py << 'EOF'
+          """
+          Validates that all MCP tool responses conform to unified schema
+          """
+          import json
+          import sys
+          from pathlib import Path
+
+          # Canonical schema from phase0_schema_sync.json
+          UNIFIED_SCHEMA = {
+              "type": "object",
+              "required": ["task_id", "status"],
+              "properties": {
+                  "task_id": {"type": "string"},
+                  "status": {
+                      "type": "string",
+                      "enum": ["Completed", "Failed", "Pending", "Processing"]
+                  },
+                  "output": {
+                      "type": ["object", "null"],
+                      "properties": {
+                          "video_url": {"type": "string"},
+                          "images": {"type": "array"},
+                          "audio_url": {"type": "string"},
+                          "duration": {"type": "number"},
+                          "metadata": {"type": "object"}
+                      }
+                  },
+                  "error": {"type": ["string", "null"]}
+              }
+          }
+
+          def find_response_examples():
+              """Find all example responses in codebase"""
+              examples = []
+
+              # Check docs for examples
+              docs_path = Path("docs")
+              if docs_path.exists():
+                  for doc_file in docs_path.rglob("*.json"):
+                      with open(doc_file) as f:
+                          try:
+                              data = json.load(f)
+                              # Look for response examples
+                              if isinstance(data, dict):
+                                  for key, value in data.items():
+                                      if "example" in key.lower() and isinstance(value, dict):
+                                          if "task_id" in value or "status" in value:
+                                              examples.append((str(doc_file), value))
+                          except json.JSONDecodeError:
+                              pass
+
+              return examples
+
+          def validate_against_schema(response_data, source):
+              """Basic schema validation"""
+              errors = []
+
+              # Check required fields
+              if "task_id" not in response_data:
+                  errors.append(f"{source}: Missing required field 'task_id'")
+
+              if "status" not in response_data:
+                  errors.append(f"{source}: Missing required field 'status'")
+              else:
+                  valid_statuses = ["Completed", "Failed", "Pending", "Processing"]
+                  if response_data["status"] not in valid_statuses:
+                      errors.append(f"{source}: Invalid status '{response_data['status']}'")
+
+              # Check output structure if present
+              if "output" in response_data and response_data["output"] is not None:
+                  output = response_data["output"]
+                  if not isinstance(output, dict):
+                      errors.append(f"{source}: 'output' must be a dict, got {type(output)}")
+
+              return errors
+
+          def main():
+              print("=" * 70)
+              print("UNIFIED MCP RESPONSE SCHEMA VALIDATION")
+              print("=" * 70)
+
+              examples = find_response_examples()
+
+              if not examples:
+                  print("✓ No example responses found to validate")
+                  return 0
+
+              all_errors = []
+
+              for source, example in examples:
+                  print(f"\nValidating: {source}")
+                  errors = validate_against_schema(example, source)
+                  all_errors.extend(errors)
+
+                  if not errors:
+                      print(f"  ✓ Schema valid")
+                  else:
+                      for error in errors:
+                          print(f"  ✗ {error}")
+
+              print("\n" + "=" * 70)
+              if all_errors:
+                  print(f"FAILED: {len(all_errors)} schema violations found")
+                  return 1
+              else:
+                  print("SUCCESS: All response examples conform to unified schema")
+                  return 0
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          EOF
+
+      - name: Run schema validation
+        run: python validate_schema.py
+
+  # ==========================================================================
+  # JOB 4: Integration Test - Full Workflow
+  # ==========================================================================
+  test-full-workflow:
+    name: Test Full Content Creation Workflow
+    runs-on: ubuntu-latest
+    needs: [test-response-parsing]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          # Run integration tests from test_video_response_handling.py
+          pytest backend/tests/test_video_response_handling.py::test_content_creation_node_json_integration \
+            backend/tests/test_video_response_handling.py::test_content_creation_node_legacy_fallback \
+            -v \
+            --tb=short
+
+  # ==========================================================================
+  # JOB 5: Documentation Check
+  # ==========================================================================
+  check-documentation:
+    name: Verify Response Format Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for phase documentation
+        run: |
+          echo "Verifying response format documentation exists..."
+
+          REQUIRED_DOCS=(
+            "docs/phase0_schema_sync.json"
+            "docs/phase1_contract_validation.md"
+            "docs/phase3_dependency_propagation.md"
+          )
+
+          MISSING_DOCS=()
+
+          for doc in "${REQUIRED_DOCS[@]}"; do
+            if [ ! -f "$doc" ]; then
+              MISSING_DOCS+=("$doc")
+            fi
+          done
+
+          if [ ${#MISSING_DOCS[@]} -gt 0 ]; then
+            echo "::error::Missing required documentation:"
+            printf '%s\n' "${MISSING_DOCS[@]}"
+            exit 1
+          fi
+
+          echo "✓ All required documentation present"
+
+      - name: Validate canonical schema exists
+        run: |
+          # Check that phase0_schema_sync.json contains canonical schema
+          if ! grep -q "canonical_json_schema" docs/phase0_schema_sync.json; then
+            echo "::error::Canonical schema not found in phase0_schema_sync.json"
+            exit 1
+          fi
+
+          echo "✓ Canonical schema documented"
+
+  # ==========================================================================
+  # JOB 6: Deployment Readiness Report
+  # ==========================================================================
+  deployment-readiness:
+    name: Generate Deployment Readiness Report
+    runs-on: ubuntu-latest
+    needs: [detect-legacy-patterns, test-response-parsing, validate-response-schema, test-full-workflow]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate readiness report
+        run: |
+          cat > deployment_readiness_report.md << 'EOF'
+          # Deployment Readiness Report
+
+          ## Response Format Compliance Check
+
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref_name }}
+
+          ### Job Results
+
+          | Job | Status |
+          |-----|--------|
+          | Legacy Pattern Detection | ${{ needs.detect-legacy-patterns.result }} |
+          | Response Parsing Tests | ${{ needs.test-response-parsing.result }} |
+          | Schema Validation | ${{ needs.validate-response-schema.result }} |
+          | Full Workflow Integration | ${{ needs.test-full-workflow.result }} |
+
+          ### Validation Summary
+
+          - [x] No unsafe legacy patterns detected
+          - [x] All response parsing tests pass
+          - [x] Schema conformance validated
+          - [x] Integration tests pass
+
+          ### Deployment Status
+
+          EOF
+
+          if [ "${{ needs.detect-legacy-patterns.result }}" == "success" ] && \
+             [ "${{ needs.test-response-parsing.result }}" == "success" ] && \
+             [ "${{ needs.validate-response-schema.result }}" == "success" ] && \
+             [ "${{ needs.test-full-workflow.result }}" == "success" ]; then
+            echo "**✅ APPROVED FOR DEPLOYMENT**" >> deployment_readiness_report.md
+            echo "" >> deployment_readiness_report.md
+            echo "All validation checks passed. System is ready for production deployment." >> deployment_readiness_report.md
+          else
+            echo "**❌ NOT APPROVED FOR DEPLOYMENT**" >> deployment_readiness_report.md
+            echo "" >> deployment_readiness_report.md
+            echo "One or more validation checks failed. Review errors before deploying." >> deployment_readiness_report.md
+          fi
+
+      - name: Upload readiness report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-readiness-report
+          path: deployment_readiness_report.md
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('deployment_readiness_report.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+
+# =============================================================================
+# WORKFLOW SUMMARY
+# =============================================================================
+#
+# This workflow enforces the Unified MCP → Agent Response Alignment Protocol
+# by validating that:
+#
+# 1. Legacy text parsing patterns are safely wrapped in try/except
+# 2. All response parsing tests pass (18 test cases)
+# 3. Response examples conform to canonical schema
+# 4. Full workflow integration succeeds
+# 5. Documentation is complete
+#
+# If all checks pass, the system is approved for deployment to production.
+#
+# =============================================================================

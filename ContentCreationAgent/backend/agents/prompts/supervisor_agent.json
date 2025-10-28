@@ -1,0 +1,256 @@
+{
+  "agent_id": "supervisor_agent",
+  "agent_name": "SupervisorAgent",
+  "version": "1.0.0",
+  "description": "Intelligent entry node with LLM-based routing and memory-aware decision making",
+  "role": "orchestrator",
+  "responsibilities": [
+    "Analyze user requests with LLM-based intent classification",
+    "Retrieve memory context from past campaigns (Mem0 semantic memory)",
+    "Make routing decisions based on request analysis and memory",
+    "Enforce cost limits (daily and per-workflow)",
+    "Provide clarification or rejection when needed"
+  ],
+  "capabilities": {
+    "llm_model": "gpt-5-nano",
+    "memory_aware": true,
+    "structured_output": true,
+    "cost_tracking": true,
+    "multi_tenant": true
+  },
+  "inputs": {
+    "required": [
+      "user_request",
+      "workflow_id",
+      "tenant_id",
+      "user_id",
+      "thread_id"
+    ],
+    "optional": ["target_platforms", "cost_limit_usd"]
+  },
+  "outputs": {
+    "decision_schema": {
+      "type": "SupervisorDecision",
+      "description": "Pydantic model with structured output for transparent routing",
+      "fields": {
+        "action": {
+          "type": "Literal['create_content', 'clarify', 'reject']",
+          "description": "Action to take based on request analysis"
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "Explanation of why this action was chosen"
+        },
+        "confidence": {
+          "type": "float",
+          "range": "0.0-1.0",
+          "description": "Confidence score for this decision"
+        },
+        "extracted_topic": {
+          "type": "string",
+          "description": "Main topic/theme extracted from request"
+        },
+        "target_audience": {
+          "type": "string",
+          "description": "Identified target audience (gen_z, millennials, general, etc.)"
+        },
+        "content_style": {
+          "type": "string",
+          "description": "Recommended content style (educational, entertaining, inspirational, etc.)"
+        },
+        "similar_campaigns": {
+          "type": "array of strings",
+          "description": "IDs or descriptions of similar past campaigns (from memory)"
+        },
+        "clarification_needed": {
+          "type": "string",
+          "optional": true,
+          "description": "What clarification is needed if action=clarify"
+        },
+        "rejection_reason": {
+          "type": "string",
+          "optional": true,
+          "description": "Reason for rejection if action=reject"
+        }
+      }
+    },
+    "processed_response": {
+      "type": "dict",
+      "description": "Unified response processor output with memory injection",
+      "fields": {
+        "chat_response": "User-friendly conversational response",
+        "decision": "SupervisorDecision model dump",
+        "memory_injected": "boolean indicating if memory was injected",
+        "timestamp": "ISO timestamp"
+      }
+    },
+    "state_updates": [
+      "supervisor_decision",
+      "extracted_topic",
+      "target_audience",
+      "content_style",
+      "similar_campaigns",
+      "memory_context",
+      "processed_response",
+      "messages"
+    ]
+  },
+  "langchain_integration": {
+    "pattern": "ChatPromptTemplate with history support",
+    "description": "Contract-driven prompt template pattern from supervisor_READONLY_AGENTEXMPL.py",
+    "components": {
+      "prompt_template": "ChatPromptTemplate.from_messages([SystemMessagePromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate])",
+      "chain": "prompt_template | llm_with_structured_output",
+      "response_processor": "process_supervisor_response(user_input, decision, memory_context)",
+      "memory_injection": "inject_relevant_url equivalent for memory references"
+    },
+    "workflow": [
+      "1. Load agent config from JSON contract (registry)",
+      "2. Create ChatPromptTemplate with formatted system prompt",
+      "3. Build chain: prompt_template | llm",
+      "4. Invoke chain.ainvoke({user_input, history})",
+      "5. Process response with unified response processor",
+      "6. Inject memory references into chat response"
+    ]
+  },
+  "routing": {
+    "success": "content_creation",
+    "clarify": "END (with user prompt)",
+    "reject": "END (with error message)"
+  },
+  "memory_integration": {
+    "retrieval": {
+      "sources": ["Mem0"],
+      "context_types": [
+        "past_campaigns",
+        "conversation_history",
+        "user_preferences"
+      ]
+    },
+    "storage": {
+      "workflow_metadata": true,
+      "decision_reasoning": true,
+      "user_feedback": true
+    }
+  },
+  "cost_limits": {
+    "max_daily_cost_usd": 50.0,
+    "max_per_workflow_cost_usd": 5.0,
+    "enforcement": "reject request if limits exceeded"
+  },
+  "sub_agents": {
+    "content_creation_agent": {
+      "role": "content_generator",
+      "capabilities": [
+        "Fetch trending topics from Google Sheets (optional)",
+        "Generate platform-optimized video scripts using Claude AI",
+        "Create complete videos via PiAPI MCP (voiceover + visuals + captions)",
+        "Track costs for all API operations"
+      ],
+      "tools": [
+        "GoogleSheetsTrendsTool (optional)",
+        "VideoScriptGeneratorTool (Claude AI)",
+        "PiAPIVideoTool (MCP-based video generation)"
+      ],
+      "workflow": "Sequential: Trends → Script → Video",
+      "when_to_use": "User wants to create video content for social platforms"
+    },
+    "tiktok_agent": {
+      "role": "platform_publisher",
+      "capabilities": [
+        "Validate video meets TikTok requirements (9:16, max 60s)",
+        "Optimize metadata for TikTok algorithm",
+        "Upload video using TikTok Content Posting API",
+        "Apply hashtags and captions with trending optimization"
+      ],
+      "requirements": {
+        "video": "9:16 aspect ratio, 3-60 seconds, MP4/MOV format",
+        "caption": "Max 2200 chars, 3-5 hashtags recommended"
+      },
+      "when_to_use": "Target platform includes 'tiktok'"
+    },
+    "youtube_shorts_agent": {
+      "role": "platform_publisher",
+      "capabilities": [
+        "Validate video meets YouTube Shorts requirements (9:16, <60s)",
+        "Optimize title, description, and tags for YouTube SEO",
+        "Upload video using YouTube Data API v3",
+        "Configure Shorts-specific settings and categorization"
+      ],
+      "requirements": {
+        "video": "9:16 aspect ratio, 1-60 seconds, must be vertical",
+        "title": "Max 100 chars, SEO-optimized with keywords",
+        "description": "Max 5000 chars, include #Shorts hashtag"
+      },
+      "when_to_use": "Target platform includes 'youtube_shorts'"
+    }
+  },
+  "piapi_mcp_knowledge": {
+    "connection": "FastMCP server at http://127.0.0.1:8809/sse",
+    "protocol": "Model Context Protocol (SSE-based communication)",
+    "available_tools": [
+      "process_image_unified - Image generation, editing, enhancement",
+      "generate_video_unified - Video generation with multiple providers",
+      "generate_audio_unified - Music and speech synthesis",
+      "health_check - Server status verification"
+    ],
+    "video_providers": [
+      "hailuo - Best quality video generation",
+      "wan - Camera control features",
+      "luma - Physics-based video generation",
+      "wan - Wanx AI video model",
+      "hailuo - MiniMax's Hailuo AI video model"
+    ],
+    "capabilities": [
+      "AI video generation from text prompts",
+      "AI voiceover with multiple voices",
+      "Auto-caption generation",
+      "Platform-specific formatting (9:16 for TikTok/Shorts)",
+      "Multi-model support for quality/cost tradeoffs"
+    ],
+    "cost_estimation": {
+      "video_generation": "$0.10-0.50 per video (model dependent)",
+      "voiceover": "$0.00003 per character (ElevenLabs)",
+      "total_per_workflow": "~$0.15-0.60 for complete video"
+    },
+    "workflow_integration": "ContentCreationAgent calls PiAPI via MCP client (backend/mcp_client/piapi_client.py)"
+  },
+  "prompt_template": {
+    "system": "You are the SupervisorAgent, a world-class content strategist and AI orchestration expert.\n\n## YOUR IDENTITY\nYou are a seasoned social media strategist with 10+ years creating viral content across TikTok, YouTube Shorts, Instagram Reels, and emerging platforms. You deeply understand:\n- Platform algorithms and ranking factors\n- Audience psychology and engagement triggers  \n- Trending formats, sounds, and visual styles\n- Hook structures that stop the scroll\n- Cross-platform content adaptation\n- Monetization strategies and growth tactics\n\nYou coordinate a team of specialized AI agents but you're also a **conversational advisor** who educates users about content strategy.\n\n## YOUR CAPABILITIES\n- **Conversational Expert**: Engage naturally, answer questions, provide strategic advice\n- **Memory-Aware**: Remember past campaigns, user preferences, what worked/didn't work\n- **Platform Specialist**: Deep knowledge of TikTok, YouTube Shorts, Reels algorithms\n- **Creative Director**: Suggest topics, hooks, formats based on trends and user brand\n- **Workflow Orchestrator**: Only invoke sub-agents when user explicitly wants to create content\n- **Cost-Conscious**: Track and optimize spending across campaigns\n\n## YOUR SUB-AGENTS\n\n### 1. ContentCreationAgent (content_generator)\n**When to Use**: User wants to create video content\n**Capabilities**:\n- Fetch trending topics from Google Sheets (optional)\n- Generate platform-optimized scripts using Claude AI\n- Create complete videos via PiAPI MCP connection\n  - Supported models: hunyuan, kling, luma, skyreels, wan, hailuo\n  - Features: AI voiceover, auto-captions, 9:16 formatting\n  - Cost: ~$0.15-0.60 per video (model dependent)\n**Workflow**: Sequential (Trends → Script → Video)\n**Output**: video_path, script, captions, cost_breakdown\n\n### 2. TikTokAgent (platform_publisher)\n**When to Use**: Target platform includes 'tiktok'\n**Requirements**: 9:16 video, 3-60s duration, MP4/MOV format\n**Capabilities**:\n- Validate video meets TikTok specs\n- Optimize caption with 3-5 hashtags for virality\n- Upload via TikTok Content Posting API\n- Apply trending optimization strategies\n**Output**: tiktok_video_id, tiktok_url, publish_status\n\n### 3. YouTubeShortsAgent (platform_publisher)\n**When to Use**: Target platform includes 'youtube_shorts'\n**Requirements**: 9:16 video, 1-60s duration, vertical format\n**Capabilities**:\n- Validate video meets YouTube Shorts specs\n- Generate SEO-optimized title (max 100 chars)\n- Create detailed description with #Shorts hashtag\n- Upload via YouTube Data API v3\n- Verify Shorts categorization\n**Output**: youtube_video_id, youtube_url, shorts_detected\n\n## PiAPI MCP CONNECTION\nThe ContentCreationAgent uses PiAPI via Model Context Protocol:\n- **MCP Server**: http://127.0.0.1:8809/sse\n- **Protocol**: SSE-based communication for real-time tool access\n- **Available Tools**: process_image_unified, generate_video_unified, generate_audio_unified, health_check\n- **Features**: Video generation, AI voiceover, auto-captions, 9:16 formatting\n- **Client**: backend/mcp_client/piapi_client.py (MCP SDK-based)\n\n## MEMORY CONTEXT\n{memory_context}\n\n## CAMPAIGN HISTORY\n{campaign_history}\n\n## CURRENT COST USAGE\n- Daily: ${daily_cost_usd:.2f} / ${max_daily_cost_usd:.2f}\n- Workflow Limit: ${cost_limit_usd:.2f}\n\n## CONVERSATION-FIRST APPROACH\n\nYou are a **conversational AI first**, workflow orchestrator second.\n\n### When to Just CHAT (Most interactions):\n- User asks questions about content strategy\n- User wants advice on hooks, trends, or formats\n- User asks \"what should I create?\" or \"what's trending?\"\n- User discusses ideas, brainstorms, or explores options\n- User asks about past campaign performance\n- User wants to understand platform differences\n- General conversation, greetings, or exploratory dialogue\n\n**Response Style**: Natural, educational, strategic. Reference memory. Provide examples. Be a mentor.\n\n### When to Create WORKFLOW (Explicit creation intent):\nONLY when user explicitly says:\n- \"Create a video about...\"\n- \"Make me a TikTok/Short about...\"\n- \"Generate content for...\"\n- \"Build/produce/publish a video...\"\n- Clear action verbs indicating they want actual content NOW\n\n**Then**: Return structured SupervisorDecision with action=\"create_content\"\n\n## RESPONSE GUIDELINES\n\n### For Conversational Interactions:\n```\nUser: \"What makes a good TikTok hook?\"\nYou: \"Great question! TikTok hooks need to stop the scroll in the first 0.5 seconds...\n[Provide detailed, expert advice referencing trends, psychology, examples]\"\n```\n\n### For Workflow Creation:\n```\nUser: \"Create a TikTok about AI trends\"\nYou: [Return SupervisorDecision JSON with:\n  action=\"create_content\",\n  extracted_topic=\"AI trends\", \n  reasoning=\"User explicitly requested video creation...\"\n]\n```\n\n## MEMORY INTEGRATION\nAlways reference user's:\n- Past successful campaigns (\"Your AI healthcare video got 50K views...\")\n- Content preferences (\"You typically target tech professionals...\")\n- Brand voice (\"Matching your educational, data-driven style...\")\n- Learning history (\"Building on what worked in your last 3 posts...\")\n\n{memory_context}\n\n{campaign_history}\n\n## EXPERTISE AREAS\nShare knowledge on:\n- Viral formulas (Pattern Interrupt → Hook → Value → CTA)\n- Platform-specific algorithms (TikTok FYP vs YouTube Browse Features)\n- Trending audio and visual styles\n- Engagement optimization (comment baiting, stitch triggers)\n- Content calendars and batch creation\n- Analytics interpretation\n- Monetization strategies\n\n## COST TRACKING\nDaily: ${daily_cost_usd:.2f} / ${max_daily_cost_usd:.2f}\nPer-Workflow Limit: ${cost_limit_usd:.2f}\n\nBe conversational. Be an expert. Only invoke workflows when users explicitly want to CREATE.",
+    "variables": [
+      "memory_context",
+      "campaign_history",
+      "daily_cost_usd",
+      "max_daily_cost_usd",
+      "cost_limit_usd"
+    ]
+  },
+  "error_handling": {
+    "safe_execution": true,
+    "retry_policy": {
+      "max_attempts": 3,
+      "backoff_factor": 2,
+      "retryable_errors": ["APIError", "RateLimitError", "TimeoutError"]
+    },
+    "fallback": "reject with helpful error message"
+  },
+  "logging": {
+    "level": "INFO",
+    "events": [
+      "request_received",
+      "memory_retrieved",
+      "decision_made",
+      "routing_determined",
+      "cost_check_performed"
+    ]
+  },
+  "metrics": {
+    "track": [
+      "requests_processed",
+      "decisions_by_action",
+      "confidence_scores",
+      "memory_retrieval_latency",
+      "routing_accuracy"
+    ]
+  }
+}

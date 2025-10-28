@@ -34,6 +34,7 @@ ENV/
 *.env
 .env.production
 .env.development
+.env.backup
 
 # Claude Code
 .claude/

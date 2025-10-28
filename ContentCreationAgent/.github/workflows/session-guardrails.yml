@@ -1,0 +1,89 @@
+name: Database Session Guardrails
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**/*.py'
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  enforce-session-pattern:
+    runs-on: ubuntu-latest
+    name: Enforce Database Session Management Rules
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check for invalid Depends(get_session)
+        run: |
+          echo "🔍 Checking for invalid Depends(get_session) usage..."
+          if grep -r "Depends(get_session)" backend/api --include="*.py" | grep -v "# NEVER use"; then
+            echo "❌ ERROR: Found Depends(get_session) in API routes!"
+            echo "   ONLY use Depends(get_db_session) for FastAPI routes."
+            exit 1
+          fi
+          echo "✅ No invalid Depends(get_session) found"
+
+      - name: Check for invalid Depends(get_db)
+        run: |
+          echo "🔍 Checking for invalid Depends(get_db) usage..."
+          if grep -r "Depends(get_db)" backend/api --include="*.py" | grep -v "# NEVER use"; then
+            echo "❌ ERROR: Found Depends(get_db) in API routes!"
+            echo "   ONLY use Depends(get_db_session) for FastAPI routes."
+            exit 1
+          fi
+          echo "✅ No invalid Depends(get_db) found"
+
+      - name: Check for invalid Depends(get_async_session)
+        run: |
+          echo "🔍 Checking for invalid Depends(get_async_session) usage..."
+          if grep -r "Depends(get_async_session)" backend/ --include="*.py" | grep -v "# NEVER use"; then
+            echo "❌ ERROR: Found Depends(get_async_session)!"
+            echo "   ONLY use Depends(get_db_session) for FastAPI routes."
+            exit 1
+          fi
+          echo "✅ No invalid Depends(get_async_session) found"
+
+      - name: Verify canonical session helpers exist
+        run: |
+          echo "🔍 Verifying canonical session helpers in models.py..."
+          if ! grep -q "async def get_db_session():" backend/database/models.py; then
+            echo "❌ ERROR: get_db_session() not found in models.py!"
+            exit 1
+          fi
+          if ! grep -q "async def open_session():" backend/database/models.py; then
+            echo "❌ ERROR: open_session() not found in models.py!"
+            exit 1
+          fi
+          echo "✅ Canonical session helpers exist"
+
+      - name: Check for LangGraph reserved field names
+        run: |
+          echo "🔍 Checking for LangGraph reserved field 'checkpoint_id'..."
+          if grep -r "checkpoint_id:" backend/state --include="*.py" | grep -v "checkpoint_ref"; then
+            echo "❌ ERROR: Found 'checkpoint_id' in state schema!"
+            echo "   This is a LangGraph reserved field. Use 'checkpoint_ref' instead."
+            exit 1
+          fi
+          echo "✅ No LangGraph reserved field conflicts found"
+
+      - name: Verify protective comments exist
+        run: |
+          echo "🔍 Verifying protective comments in route files..."
+          if ! grep -q "DATABASE SESSION MANAGEMENT GUARDRAILS" backend/api/routes.py; then
+            echo "⚠️  WARNING: Protective comment missing in routes.py"
+          fi
+          if ! grep -q "DATABASE SESSION MANAGEMENT GUARDRAILS" backend/api/chat_routes.py; then
+            echo "⚠️  WARNING: Protective comment missing in chat_routes.py"
+          fi
+          echo "✅ Guardrails check complete"
+
+      - name: All checks passed
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ All database session management guardrails passed!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,225 @@
+# Content Creation Agent v3.0.0 - Docker Compose Configuration
+# Multi-service orchestration with Mem0 + PostgreSQL + PiAPI MCP Integration
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Backend Services
+  # ============================================================================
+
+  # Main FastAPI backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: content-agent-backend
+    ports:
+      - '8006:8000' # Backend on 8006 (if taken, use 8007)
+    environment:
+      # Core AI Services
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
+
+      # Memory Services (Mem0 semantic memory engine)
+      - MEM0_API_KEY=${MEM0_API_KEY}
+      - MEM0_ORG_ID=${MEM0_ORG_ID:-default-org}
+      - MEM0_PROJECT=content-creation-agent
+
+      # Database Configuration
+      - DATABASE_URL=postgresql+asyncpg://agentuser:${POSTGRES_PASSWORD:-changeme}@postgres:5432/content_agent
+      - POSTGRES_USER=agentuser
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=content_agent
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+
+      # PiAPI FastMCP Server (TypeScript) - backend connects to MCP server, not directly to PiAPI API
+      # IMPORTANT: Base URL only - MCP SDK will append /sse automatically
+      - PIAPI_MCP_SERVER_URL=http://piapi-mcp:8809
+      - PIAPI_MCP_ENABLED=${PIAPI_MCP_ENABLED:-true}
+      # NOTE: PIAPI_API_KEY should NOT be set here - it belongs in FastMCP server's .env.local
+
+      # Voice Services
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+
+      # Google Services
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - YOUTUBE_CLIENT_SECRET_PATH=/app/secrets/client_secret.json
+
+      # Cost Limits
+      - MAX_DAILY_COST_USD=${MAX_DAILY_COST_USD:-100.0}
+      - MAX_PER_WORKFLOW_COST_USD=${MAX_PER_WORKFLOW_COST_USD:-10.0}
+
+      # Application Settings
+      - APP_NAME=Content Creation Agent
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    volumes:
+      # Persistent data
+      - ./data:/app/data
+      - ./videos:/app/videos
+      - ./logs:/app/logs
+
+      # Secrets (OAuth credentials)
+      - ./secrets:/app/secrets:ro
+
+      # Development: Mount code for hot reload (uncomment for dev)
+      - ./backend:/app/backend
+      # - ./app:/app/app
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      piapi-mcp:
+        condition: service_started
+
+    networks:
+      - agent-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for PostgreSQL to fully initialize...' &&
+        sleep 5 &&
+        uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # React Frontend (Framer Motion UI)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: content-agent-frontend
+    ports:
+      - '3006:80' # Frontend on 3006 (if taken, use 3007)
+    depends_on:
+      - backend
+    networks:
+      - agent-network
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://127.0.0.1/health',
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================================
+  # Data Services
+  # ============================================================================
+
+  # PostgreSQL database (structured data + thread persistence)
+  postgres:
+    image: postgres:15-alpine
+    container_name: content-agent-db
+    environment:
+      - POSTGRES_USER=agentuser
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=content_agent
+      - POSTGRES_HOST_AUTH_METHOD=trust # Trust all connections (development only)
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.UTF-8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - '5433:5432' # Use 5433 on host to avoid conflict with local PostgreSQL
+    networks:
+      - agent-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "pg_isready -U agentuser -d content_agent && psql -U agentuser -d content_agent -c 'SELECT 1' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ============================================================================
+  # Integration Services
+  # ============================================================================
+
+  # PiAPI FastMCP Server (TypeScript - 4 unified AI generation tools)
+  piapi-mcp:
+    build:
+      context: ../PiAPI_MCP/piapi_fastmcp_server
+      dockerfile: Dockerfile
+    container_name: content-agent-piapi-mcp
+    ports:
+      - '8809:8809' # FastMCP server on port 8809
+    volumes:
+      # Mount .env.local file for PiAPI credentials
+      - ../PiAPI_MCP/piapi_fastmcp_server/.env.local:/app/.env.local:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=8809
+      - PY_BACKEND_URL=http://backend:8000
+      - LOG_LEVEL=info
+    env_file:
+      - ../PiAPI_MCP/piapi_fastmcp_server/.env.local
+    networks:
+      - agent-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'nc -z localhost 8809 || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================================
+  # Production Services (optional)
+  # ============================================================================
+
+  # Nginx reverse proxy (production only)
+  nginx:
+    image: nginx:alpine
+    container_name: content-agent-nginx
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+    networks:
+      - agent-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+# ============================================================================
+# Persistent Volumes
+# ============================================================================
+
+volumes:
+  postgres_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+
+networks:
+  agent-network:
+    driver: bridge

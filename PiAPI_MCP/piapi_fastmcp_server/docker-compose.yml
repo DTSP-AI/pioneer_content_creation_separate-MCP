@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  piapi_fastmcp:
+    container_name: piapi_fastmcp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: piapi-fastmcp:latest
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=production
+      - PORT=8809
+      - PY_BACKEND_URL=http://piapi_python:8000
+    ports:
+      - "8809:8809"
+    depends_on:
+      piapi_python:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mcp_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8809/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  piapi_python:
+    container_name: piapi_python
+    build:
+      context: ../piapi_python_backend
+      dockerfile: Dockerfile
+    image: piapi-python-backend:latest
+    env_file:
+      - ../piapi_python_backend/.env.local
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - mcp_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  mcp_network:
+    driver: bridge

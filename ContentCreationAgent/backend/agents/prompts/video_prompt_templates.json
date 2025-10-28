@@ -1,0 +1,88 @@
+{
+  "description": "Video Prompt Templates for PiAPI MCP Tools - Optimized for Hunyuan, Kling, Luma",
+  "version": "1.0.0",
+  "templates": {
+    "ai_technology": {
+      "hunyuan": "Futuristic {scene}, dramatic neon lighting from above creates soft glow on metallic surfaces, cinematic wide angle shot, smooth camera pan across the scene, high-tech atmosphere, photorealistic rendering, sharp 8k quality",
+      "kling": "Close-up of {subject}, dynamic camera movement zooming in slowly on digital interface, vibrant blue and purple colors, modern aesthetic with floating holographic elements, sharp focus on center, energetic pacing",
+      "luma": "Filmed in wide tracking shot with dynamic motion, {scene}, cool blue lighting with warm accent highlights, smooth cinematic dolly movement, professional broadcast quality, tech-focused composition"
+    },
+    "business_entrepreneurship": {
+      "hunyuan": "Professional {scene}, clean corporate lighting from multiple angles, aerial establishing shot moving downward, business district atmosphere, sharp modern aesthetic, 4k broadcast quality",
+      "kling": "Mid-shot of {subject}, camera tracking smoothly alongside, professional color grading with warm tones, clean composition, confident pacing, high-end commercial aesthetic",
+      "luma": "Filmed in smooth steadicam tracking shot, {scene}, natural office lighting with soft shadows, professional cinematography, corporate video style, polished and refined"
+    },
+    "health_fitness": {
+      "hunyuan": "Energetic {scene}, bright natural sunlight from window creates dramatic shadows, dynamic low-angle shot looking up, motivational atmosphere, vibrant healthy colors, high energy pacing",
+      "kling": "Action shot of {subject}, camera following movement with dynamic tracking, vibrant saturated colors, fast-paced editing rhythm, athletic aesthetic, slow-motion highlights",
+      "luma": "Filmed with handheld energy and smooth stabilization, {scene}, bright natural lighting with high contrast, dynamic camera movement following action, inspirational sports documentary style"
+    },
+    "food_cooking": {
+      "hunyuan": "Appetizing {scene}, warm soft lighting from above creates appetizing glow on food, overhead shot slowly descending, cozy kitchen atmosphere, vibrant food colors, mouth-watering presentation",
+      "kling": "Extreme close-up of {subject}, camera slowly circling around dish, colorful ingredients with perfect color saturation, warm ambient lighting, ASMR-style intimate framing",
+      "luma": "Filmed in smooth overhead crane shot, {scene}, warm golden hour lighting, gentle camera movement revealing dish, food photography aesthetics, restaurant quality presentation"
+    },
+    "travel_adventure": {
+      "hunyuan": "Breathtaking {scene}, dramatic golden hour lighting from horizon, sweeping aerial establishing shot, wanderlust atmosphere, rich cinematic colors, epic landscape framing",
+      "kling": "Wide establishing shot of {subject}, camera panning slowly across vista, vibrant natural colors with enhanced saturation, adventurous pacing, travel vlog aesthetic",
+      "luma": "Filmed with cinematic aerial drone movement, {scene}, natural sunlight with lens flares, smooth tracking shot across landscape, travel documentary cinematography, immersive wide-angle perspective"
+    },
+    "general": {
+      "hunyuan": "Realistic {scene}, natural balanced lighting, smooth camera movement, documentary style, photorealistic rendering, authentic atmosphere, professional quality",
+      "kling": "Medium shot of {subject}, steady camera with natural motion, realistic colors, clean composition, professional pacing, broadcast standard",
+      "luma": "Filmed with natural camera movement, {scene}, soft natural lighting, smooth cinematography, documentary realism, engaging visual storytelling"
+    }
+  },
+  "negative_prompts": {
+    "high_quality": "chaos, bad video, low quality, low resolution, blurry, distorted, choppy motion, amateur, pixelated, artifacts, glitches, watermark, logo, text overlay, compression artifacts",
+    "standard": "low quality, blurry, distorted, choppy motion, pixelated",
+    "minimal": "bad video, low quality"
+  },
+  "motion_cues": [
+    "smooth camera pan from left to right",
+    "gentle zoom in on subject",
+    "tracking shot following movement",
+    "slow motion effect highlighting key moment",
+    "cinematic dolly movement forward",
+    "aerial drone shot descending smoothly",
+    "handheld camera with natural shake",
+    "crane shot rising upward",
+    "steadicam tracking alongside subject",
+    "orbiting camera circling around center"
+  ],
+  "lighting_descriptions": [
+    "dramatic lighting from above creates soft glow",
+    "warm golden hour sunlight from window",
+    "cool blue tone with warm accent highlights",
+    "natural diffused lighting with soft shadows",
+    "high-contrast lighting with deep blacks",
+    "neon lighting casting colorful reflections",
+    "soft backlight creating rim light effect",
+    "studio lighting with three-point setup",
+    "moody atmospheric lighting with haze",
+    "bright even lighting for clarity"
+  ],
+  "quality_keywords": [
+    "photorealistic",
+    "cinematic",
+    "8k quality",
+    "professional broadcast quality",
+    "high production value",
+    "sharp focus",
+    "vibrant colors",
+    "smooth motion",
+    "professional cinematography",
+    "polished aesthetic"
+  ],
+  "usage_notes": {
+    "hunyuan": "Built-in prompt rewrite feature - detailed prompts work best. Supports text-to-video and image-to-video modes. Use 'fastHunyuan' for speed.",
+    "kling": "Excellent for dynamic content with motion. Supports negative prompts. Duration: 5s or 10s. Handles complex layered prompts well.",
+    "luma": "Best for cinematic smooth motion. Supports keyframes. Duration: 5s or 10s. Excels at camera movement descriptions.",
+    "aspect_ratios": {
+      "tiktok": "9:16 (vertical)",
+      "youtube_shorts": "9:16 (vertical)",
+      "youtube": "16:9 (horizontal)",
+      "instagram": "9:16 (vertical)"
+    }
+  }
+}
