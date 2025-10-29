@@ -6,6 +6,13 @@ Handles conversational workflow creation:
 2. Generates workflow proposals
 3. Returns human-readable responses
 4. Creates workflows on approval
+
+⚠️ IMPORTANT - LLM PRIORITY:
+- PRIMARY: Claude (Anthropic) - claude-3-5-sonnet-20240620
+- FALLBACK: OpenAI (gpt-5-nano) - only if ANTHROPIC_API_KEY not available
+- Priority logic at lines 33-49 (get_llm function)
+- Claude is preferred for all conversational interactions
+- OpenAI used only as fallback when Claude unavailable
 """
 
 import logging
@@ -14,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+import anthropic
 
 from backend.config import get_settings
 from backend.database.models import ThreadMessage
@@ -29,11 +37,38 @@ settings = get_settings()
 
 # Lazy LLM initialization function
 def get_llm():
-    """Get LLM instance with fallback logic"""
+    """Get LLM instance with fallback logic and model validation"""
     if settings.ANTHROPIC_API_KEY:
         from langchain_anthropic import ChatAnthropic
+
+        # Validate Claude model name
+        valid_models = [
+            # Current models (2025)
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-4-5",
+            "claude-opus-4-1-20250805",
+            "claude-opus-4-1",
+            # Legacy models (deprecated)
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-sonnet-20240620",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307"
+        ]
+
+        model = settings.ANTHROPIC_MODEL
+        if model not in valid_models:
+            logger.warning(
+                f"Potentially invalid Claude model '{model}'. "
+                f"Valid models: {', '.join(valid_models)}. "
+                f"Falling back to claude-sonnet-4-5-20250929"
+            )
+            model = "claude-sonnet-4-5-20250929"
+
         return ChatAnthropic(
-            model=settings.ANTHROPIC_MODEL,
+            model=model,
             temperature=0.7,
             anthropic_api_key=settings.ANTHROPIC_API_KEY
         )
@@ -194,6 +229,45 @@ Response: {"intent": "question", "platforms": [], "content_type": null, "topic":
         analysis = json.loads(content)
 
         return analysis
+
+    except anthropic.NotFoundError as e:
+        logger.error(f"Claude model not found: {e}. Attempting fallback to OpenAI.")
+
+        # Try OpenAI fallback
+        try:
+            if settings.OPENAI_API_KEY:
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=message)
+                ]
+
+                client = ChatOpenAI(
+                    model=settings.OPENAI_MODEL,
+                    api_key=settings.OPENAI_API_KEY
+                )
+                response = await client.ainvoke(messages)
+
+                import json
+                import re
+                content = response.content.strip()
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    content = json_match.group(0)
+
+                analysis = json.loads(content)
+                return analysis
+            else:
+                raise ValueError("No valid LLM available for fallback")
+        except Exception as fallback_error:
+            logger.error(f"OpenAI fallback also failed: {fallback_error}")
+            # Return default intent
+            return {
+                "intent": "other",
+                "platforms": [],
+                "content_type": None,
+                "topic": message[:100],
+                "confidence": 0.0
+            }
 
     except Exception as e:
         logger.error(f"Error analyzing intent: {e}", exc_info=True)

@@ -234,6 +234,72 @@ async def mcp_health_check():
         )
 
 
+@app.get("/health/claude", tags=["health"])
+async def claude_health_check():
+    """
+    Check Claude API connectivity and model validity.
+
+    Tests the Claude/Anthropic API configuration and verifies:
+    - API key is valid
+    - Model name is accessible
+    - API responds correctly
+
+    Returns:
+        Claude API connection status and model information
+    """
+    from backend.workflow.supervisor_chat import get_llm
+    from langchain_core.messages import HumanMessage
+    import anthropic
+
+    try:
+        # Get LLM instance (will use Claude if available)
+        llm = get_llm()
+
+        # Test with simple prompt
+        response = await llm.ainvoke([HumanMessage(content="Hello")])
+
+        return JSONResponse({
+            "status": "connected",
+            "model": settings.ANTHROPIC_MODEL,
+            "provider": "anthropic",
+            "message": "Claude API is accessible and responding correctly"
+        })
+
+    except anthropic.NotFoundError as e:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "model_not_found",
+                "model": settings.ANTHROPIC_MODEL,
+                "provider": "anthropic",
+                "message": f"Model '{settings.ANTHROPIC_MODEL}' not found. Update ANTHROPIC_MODEL environment variable to a valid model (e.g., claude-3-5-sonnet-20241022)",
+                "error": str(e)
+            }
+        )
+
+    except anthropic.AuthenticationError as e:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "status": "authentication_failed",
+                "provider": "anthropic",
+                "message": "Invalid Anthropic API key. Check ANTHROPIC_API_KEY environment variable.",
+                "error": str(e)
+            }
+        )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "provider": "anthropic",
+                "message": f"Claude API error: {str(e)}",
+                "error": str(e)
+            }
+        )
+
+
 # Root endpoint
 @app.get("/", tags=["root"])
 async def root():

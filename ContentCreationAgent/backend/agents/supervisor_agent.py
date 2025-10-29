@@ -10,6 +10,12 @@ Key improvements:
 - Thread + persistent memory integration
 - Structured decisions ONLY when needed for workflows
 - Expert knowledge in social media content creation
+
+⚠️ IMPORTANT - MODEL CONFIGURATION:
+- This agent uses OpenAI's gpt-5-nano model (settings.OPENAI_MODEL)
+- gpt-5-nano is a VALID, ACTIVE OpenAI model optimized for fast, low-cost routing
+- DO NOT change to gpt-4o-mini or other models without explicit authorization
+- Model configured at lines 411 and 574 (ChatOpenAI initialization)
 """
 
 from typing import Dict, Any, Optional, List, Literal

@@ -39,10 +39,11 @@ class Settings(BaseSettings):
 
     # LLM Providers
     ANTHROPIC_API_KEY: Optional[str] = None  # Optional - can use OpenAI instead
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"  # Current Claude Sonnet 4.5
 
     OPENAI_API_KEY: Optional[str] = None  # For simple routing/chat (low-cost)
-    OPENAI_MODEL: str = "gpt-5-nano"  # For fast, low-cost routing
+    # NOTE: gpt-5-nano is a VALID, ACTIVE OpenAI model - optimized for fast, low-cost routing
+    OPENAI_MODEL: str = "gpt-5-nano"  # ACTIVE MODEL - do not change
     OPENAI_SCRIPT_MODEL: str = "gpt-5-nano"  # Not used (Claude handles scripts, GPT is fallback)
 
     # Voice Services
@@ -115,6 +116,36 @@ settings = Settings()
 
 # Cost tracking configuration
 COST_PER_1K_TOKENS = {
+    # Current models (2025)
+    "claude-sonnet-4-5-20250929": {
+        "input": 0.003,
+        "output": 0.015
+    },
+    "claude-sonnet-4-5": {
+        "input": 0.003,
+        "output": 0.015
+    },
+    "claude-haiku-4-5-20251001": {
+        "input": 0.00025,
+        "output": 0.00125
+    },
+    "claude-haiku-4-5": {
+        "input": 0.00025,
+        "output": 0.00125
+    },
+    "claude-opus-4-1-20250805": {
+        "input": 0.015,
+        "output": 0.075
+    },
+    "claude-opus-4-1": {
+        "input": 0.015,
+        "output": 0.075
+    },
+    # Legacy models (deprecated)
+    "claude-3-5-sonnet-20240620": {
+        "input": 0.003,
+        "output": 0.015
+    },
     "claude-3-5-sonnet-20241022": {
         "input": 0.003,
         "output": 0.015

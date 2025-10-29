@@ -3,6 +3,18 @@ Video Script Generator Tool
 
 Generates engaging video scripts using Anthropic Claude.
 Used by ContentCreationAgent for content creation.
+
+⚠️ IMPORTANT - LLM PRIORITY:
+- PRIMARY: Claude (Anthropic) - claude-3-5-sonnet-20240620
+- FALLBACK: OpenAI (gpt-5-nano) - only if ANTHROPIC_API_KEY not available
+- Priority logic at lines 86-98 (_arun method)
+- Claude is ALWAYS preferred for script generation due to superior creative writing
+- DO NOT reverse this priority without explicit authorization
+
+Implementation:
+1. Check if ANTHROPIC_API_KEY is set -> Use Claude
+2. Else check if OPENAI_API_KEY is set -> Use OpenAI (fallback)
+3. Else raise ValueError
 """
 
 from typing import Optional, Type

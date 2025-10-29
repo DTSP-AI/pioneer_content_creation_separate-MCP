@@ -6,6 +6,13 @@ Centralized content creation using:
 2. VideoScriptGeneratorTool - Generate script (Claude)
 3. PiAPIVideoTool - Create complete video with voiceover + captions
 
+⚠️ IMPORTANT - LLM CONFIGURATION:
+- Script generation uses CLAUDE (Anthropic) as PRIMARY model
+- Claude model: claude-3-5-sonnet-20240620 (ANTHROPIC_MODEL)
+- OpenAI (gpt-5-nano) is FALLBACK ONLY if Claude API key not available
+- Priority: Claude > OpenAI > Error
+- See video_script_tool.py lines 86-98 for implementation
+
 Architecture Compliance:
 - LangGraph node (async function)
 - Reads from VideoWorkflowState
